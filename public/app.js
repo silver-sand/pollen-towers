@@ -20,6 +20,7 @@ let raycaster, mouse;
 let hoveredFloor     = null;
 let floorMeshes      = [];
 let animating        = false;
+let animEnd          = 0; // timestamp (performance.now) when current animation finishes
 let cameraPosStart, cameraTargetStart;
 
 // ─── DOM refs ─────────────────────────────────────────────────────────────────
@@ -345,10 +346,15 @@ function createTower() {
   });
 
   // ── Stars ────────────────────────────────────────────────────────────────
+  const starCount = 1000;
+  const starPos = new Float32Array(starCount * 3);
+  for (let i = 0; i < starCount; i++) {
+    starPos[i * 3 + 0] = (Math.random() - 0.5) * 200;
+    starPos[i * 3 + 1] = (Math.random() - 0.5) * 200;
+    starPos[i * 3 + 2] = (Math.random() - 0.5) * 200;
+  }
   const starGeo = new THREE.BufferGeometry();
-  const starPos = new Float32Array(3000);
-  for (let i = 0; i < 3000; i++) starPos[i] = (Math.random() - 0.5) * 200;
-  starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 1));
+  starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
   const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.15, transparent: true, opacity: 0.7 });
   const stars   = new THREE.Points(starGeo, starMat);
   addTowerObj(stars);
@@ -417,6 +423,9 @@ function updateNav() {
 
 // ─── Navigation ───────────────────────────────────────────────────────────────
 function goToFloor(index) {
+  // If the previous animation's end time has passed but the flag is still set
+  // (rAF was throttled / tab was backgrounded), force-reset so we never get stuck
+  if (animating && performance.now() >= animEnd) animating = false;
   if (animating) return;
   index = Math.max(0, Math.min(TOTAL_FLOORS - 1, index));
   currentFloor = index;
@@ -428,7 +437,8 @@ function goToFloor(index) {
   const endPos    = new THREE.Vector3(22, targetY + 6, 22);
   const duration  = 500;
   const start     = performance.now();
-  animating       = true;
+  animating = true;
+  animEnd   = start + duration;
 
   function animate(now) {
     const t  = Math.min((now - start) / duration, 1);
@@ -440,7 +450,6 @@ function goToFloor(index) {
   }
   requestAnimationFrame(animate);
   updateNav();
-  if (currentFloor < companies.length) { selectedCompany = companies[currentFloor]; showOfficeDetail(selectedCompany); }
 }
 
 // ─── Modal ────────────────────────────────────────────────────────────────────
@@ -457,8 +466,8 @@ function showOfficeDetail(company) {
     <div class="detail-section"><div class="detail-label">Agents</div><div>${(company.agents||[]).map(a=>`<span class="agent-tag">${esc(a)}</span>`).join('')}</div></div>
     ${pending.length ? `<div class="detail-section"><div class="detail-label">Pending Jobs (${pending.length})</div>${
       pending.map(j => `<div class="job-item pending"><div class="job-status">⏳ ${esc(j.title)}</div><div class="job-actions">
-        <button class="btn btn-approve" data-action="approve" data-id="${esc(String(j.id||j.title))}">Approve</button>
-        <button class="btn btn-decline"  data-action="decline"  data-id="${esc(String(j.id||j.title))}">Decline</button></div></div>`).join('')}
+        <button class="btn btn-approve" data-action="approve" data-company="${company.id}" data-id="${esc(String(j.id||j.title))}">Approve</button>
+        <button class="btn btn-decline"  data-action="decline"  data-company="${company.id}" data-id="${esc(String(j.id||j.title))}">Decline</button></div></div>`).join('')}
     </div>` : ''}
     ${done.length ? `<div class="detail-section"><div class="detail-label">Completed</div>${
       done.slice(-3).map(j => `<div class="job-item done">✓ ${esc(j.title)}</div>`).join('')}</div>` : ''}

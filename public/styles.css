@@ -41,8 +41,8 @@ html, body {
   cursor: grab;
 }
 #tower-canvas:active { cursor: grabbing; }
-/* Modal-open canvas hides pointer events except on the modal itself */
-#tower-canvas.modal-open { pointer-events: none; }
+/* Modal open — canvas is on #app, not on canvas itself */
+#app.modal-open #tower-canvas { pointer-events: none; }
 
 /* Header */
 #topbar {
