@@ -225,9 +225,10 @@ function createTower() {
             mesh.position.set(w * 1.3, wy, tier.halfD + 0.09);
             mesh.userData.isTower = true; scene.add(mesh);
 
-            const meshB = mesh.clone();
-            meshB.position.z = -tier.halfD - 0.09;
-            meshB.userData.isTower = true; scene.add(meshB);
+            // Back window — new mesh with same material
+            const backFront = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.5, 0.06), wm);
+            backFront.position.set(w * 1.3, wy, -tier.halfD - 0.09);
+            backFront.userData.isTower = true; scene.add(backFront);
           }
           // Sides
           for (let w = -1; w <= 1; w++) {
@@ -238,9 +239,10 @@ function createTower() {
             mesh.position.set(tier.halfW + 0.09, wy, w * 1.3);
             mesh.userData.isTower = true; scene.add(mesh);
 
-            const meshB = mesh.clone();
-            meshB.position.x = -tier.halfW - 0.09;
-            meshB.userData.isTower = true; scene.add(meshB);
+            // Back side window — new mesh with same material
+            const backSide = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.5, 0.7), wm);
+            backSide.position.set(-tier.halfW - 0.09, wy, w * 1.3);
+            backSide.userData.isTower = true; scene.add(backSide);
           }
         }
       }
