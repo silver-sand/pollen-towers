@@ -1,5 +1,6 @@
 // Pollen Towers — AI-Run Companies
 // Quest #17999
+// FIX: Every mesh gets its own material instance. No sharing. No emissive bugs.
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
@@ -63,7 +64,7 @@ controls.enableDamping  = true;
 controls.dampingFactor  = 0.08;
 controls.minDistance     = 12;
 controls.maxDistance     = 55;
-controls.maxPolarAngle  = Math.PI * 0.48;   // never below horizon
+controls.maxPolarAngle  = Math.PI * 0.48;
 controls.target.set(0, 14, 0);
 
 // ─── Lights ───────────────────────────────────────────────────────────────────
@@ -89,11 +90,16 @@ const skyLight = new THREE.PointLight(0xfbbf24, 0.6, 40);
 skyLight.position.set(-8, 35, 8);
 scene.add(skyLight);
 
-// ─── Materials ────────────────────────────────────────────────────────────────
-const matConcrete = new THREE.MeshStandardMaterial({ color: 0x3a3f55, roughness: 0.85 });
-const matGlass    = new THREE.MeshStandardMaterial({ color: 0x88bbee, roughness: 0.05, metalness: 0.3, transparent: true, opacity: 0.65 });
-const matGround   = new THREE.MeshStandardMaterial({ color: 0x1a2035, roughness: 0.95 });
-const matSpire    = new THREE.MeshStandardMaterial({ color: 0xfbbf24, metalness: 0.9, roughness: 0.15 });
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+// Make a fresh material every time — NEVER share between meshes
+function makeMat(params) {
+  return new THREE.MeshStandardMaterial(params);
+}
+
+function addTowerObj(obj) {
+  obj.userData.isTower = true;
+  scene.add(obj);
+}
 
 // ─── Build Tower ──────────────────────────────────────────────────────────────
 function clearTower() {
@@ -108,46 +114,45 @@ function createTower() {
 
   // ── Ground plane ──────────────────────────────────────────────────────────
   const groundGeo = new THREE.PlaneGeometry(120, 120);
-  const ground    = new THREE.Mesh(groundGeo, matGround);
+  const ground    = new THREE.Mesh(groundGeo, makeMat({ color: 0x1a2035, roughness: 0.95 }));
   ground.rotation.x = -Math.PI / 2;
   ground.receiveShadow = true;
-  ground.userData.isTower = true;
-  scene.add(ground);
+  addTowerObj(ground);
 
-  // ── Street grid lines (subtle) ────────────────────────────────────────────
+  // ── Street grid lines ─────────────────────────────────────────────────────
   const lineMat = new THREE.LineBasicMaterial({ color: 0x2a3050, transparent: true, opacity: 0.4 });
   [-8, -4, 0, 4, 8].forEach(x => {
     const pts = [new THREE.Vector3(x, 0.02, -50), new THREE.Vector3(x, 0.02, 50)];
     const geo = new THREE.BufferGeometry().setFromPoints(pts);
-    const line = new THREE.Line(geo, lineMat); line.userData.isTower = true; scene.add(line);
+    const line = new THREE.Line(geo, lineMat);
+    addTowerObj(line);
   });
   [-8, -4, 0, 4, 8].forEach(z => {
     const pts = [new THREE.Vector3(-50, 0.02, z), new THREE.Vector3(50, 0.02, z)];
     const geo = new THREE.BufferGeometry().setFromPoints(pts);
-    const line = new THREE.Line(geo, lineMat); line.userData.isTower = true; scene.add(line);
+    const line = new THREE.Line(geo, lineMat);
+    addTowerObj(line);
   });
 
-  // ── Foundation (wide base) ───────────────────────────────────────────────
+  // ── Foundation ────────────────────────────────────────────────────────────
   const baseW = 7, baseD = 7;
   const baseGeo  = new THREE.BoxGeometry(baseW, 1.0, baseD);
-  const base     = new THREE.Mesh(baseGeo, new THREE.MeshStandardMaterial({ color: 0x2a2f45, roughness: 0.9 }));
+  const base     = new THREE.Mesh(baseGeo, makeMat({ color: 0x2a2f45, roughness: 0.9 }));
   base.position.set(0, 0.5, 0);
   base.castShadow = true; base.receiveShadow = true;
-  base.userData.isTower = true; scene.add(base);
+  addTowerObj(base);
 
   // Entrance canopy
   const canopyGeo = new THREE.BoxGeometry(3, 0.15, 2);
-  const canopyMat = new THREE.MeshStandardMaterial({ color: 0xfbbf24, metalness: 0.6, roughness: 0.3 });
-  const canopy = new THREE.Mesh(canopyGeo, canopyMat);
+  const canopy    = new THREE.Mesh(canopyGeo, makeMat({ color: 0xfbbf24, metalness: 0.6, roughness: 0.3 }));
   canopy.position.set(0, 1.1, baseD / 2 + 0.8);
-  canopy.userData.isTower = true; scene.add(canopy);
+  addTowerObj(canopy);
 
   // ── Setback tiers ────────────────────────────────────────────────────────
-  // Each tier spans 4 floors, stepping inward
   const tiers = [
-    { floors: [0,1,2,3],  halfW: 3.8, halfD: 3.8, yBase: 1.0 },   // ground floors (wide)
-    { floors: [4,5,6,7],  halfW: 3.2, halfD: 3.2, yBase: 11.0 },  // mid
-    { floors: [8,9,10,11],halfW: 2.6, halfD: 2.6, yBase: 21.0 },  // upper (tapered)
+    { floors: [0,1,2,3],  halfW: 3.8, halfD: 3.8, yBase: 1.0 },
+    { floors: [4,5,6,7],  halfW: 3.2, halfD: 3.2, yBase: 11.0 },
+    { floors: [8,9,10,11],halfW: 2.6, halfD: 2.6, yBase: 21.0 },
   ];
 
   tiers.forEach(tier => {
@@ -157,138 +162,137 @@ function createTower() {
       const baseY = tier.yBase + fi * FLOOR_HEIGHT;
       const col   = isOcc ? (c?.color ?? 0x34d399) : 0x252a40;
 
-      // Floor slab
+      // Floor slab — OWN material
       const slabGeo = new THREE.BoxGeometry(tier.halfW * 2, 0.2, tier.halfD * 2);
-      const slabMat = new THREE.MeshStandardMaterial({
-        color: col, roughness: 0.4, metalness: isOcc ? 0.3 : 0.05,
-        emissive: isOcc ? new THREE.Color(col) : new THREE.Color(0x000000),
-        emissiveIntensity: isOcc ? 0.2 : 0,
+      const slabMat = makeMat({
+        color: col, roughness: 0.4, metalness: isOcc ? 0.3 : 0.05
       });
       const slab = new THREE.Mesh(slabGeo, slabMat);
       slab.position.set(0, baseY, 0);
       slab.castShadow = true; slab.receiveShadow = true;
-      slab.userData = { floor: fi, isOccupied: isOcc, company: c, isTower: true };
-      scene.add(slab);
+      slab.userData = { floor: fi, isOccupied: isOcc, company: c };
+      addTowerObj(slab);
       floorMeshes.push(slab);
 
-      // Core walls (4 sides)
-      const wallH   = FLOOR_HEIGHT - 0.3;
-      const wallMat = new THREE.MeshStandardMaterial({
-        color: isOcc ? 0x3d4663 : 0x252a40, roughness: 0.7
-      });
+      // ── Walls — EACH wall gets its own material ─────────────────────────
+      const wallH = FLOOR_HEIGHT - 0.3;
+      const wallColor = isOcc ? 0x3d4663 : 0x252a40;
 
-      // Front & back walls (with window cutouts simulated via inset panels)
+      // Front wall
       const frontGeo = new THREE.BoxGeometry(tier.halfW * 2, wallH, 0.18);
-      [[0, baseY + wallH / 2, tier.halfD]].forEach(([x, y, z]) => {
-        const w = new THREE.Mesh(frontGeo, wallMat);
-        w.position.set(x, y, z); w.castShadow = true;
-        w.userData.isTower = true; scene.add(w);
-      });
-      [[0, baseY + wallH / 2, -tier.halfD]].forEach(([x, y, z]) => {
-        const w = new THREE.Mesh(frontGeo, wallMat);
-        w.position.set(x, y, z); w.castShadow = true;
-        w.userData.isTower = true; scene.add(w);
-      });
+      const frontMat = makeMat({ color: wallColor, roughness: 0.7 });
+      const frontWall = new THREE.Mesh(frontGeo, frontMat);
+      frontWall.position.set(0, baseY + wallH / 2, tier.halfD);
+      frontWall.castShadow = true;
+      addTowerObj(frontWall);
+
+      // Back wall
+      const backMat = makeMat({ color: wallColor, roughness: 0.7 });
+      const backWall = new THREE.Mesh(frontGeo, backMat);
+      backWall.position.set(0, baseY + wallH / 2, -tier.halfD);
+      backWall.castShadow = true;
+      addTowerObj(backWall);
 
       // Side walls
       const sideGeo = new THREE.BoxGeometry(0.18, wallH, tier.halfD * 2);
-      [[tier.halfW, baseY + wallH / 2, 0]].forEach(([x, y, z]) => {
-        const w = new THREE.Mesh(sideGeo, wallMat);
-        w.position.set(x, y, z); w.castShadow = true;
-        w.userData.isTower = true; scene.add(w);
-      });
-      [[-tier.halfW, baseY + wallH / 2, 0]].forEach(([x, y, z]) => {
-        const w = new THREE.Mesh(sideGeo, wallMat);
-        w.position.set(x, y, z); w.castShadow = true;
-        w.userData.isTower = true; scene.add(w);
-      });
+      const rightMat = makeMat({ color: wallColor, roughness: 0.7 });
+      const rightWall = new THREE.Mesh(sideGeo, rightMat);
+      rightWall.position.set(tier.halfW, baseY + wallH / 2, 0);
+      rightWall.castShadow = true;
+      addTowerObj(rightWall);
 
-      // ── Window lights for occupied floors ───────────────────────────────
+      const leftMat = makeMat({ color: wallColor, roughness: 0.7 });
+      const leftWall = new THREE.Mesh(sideGeo, leftMat);
+      leftWall.position.set(-tier.halfW, baseY + wallH / 2, 0);
+      leftWall.castShadow = true;
+      addTowerObj(leftWall);
+
+      // ── Window lights for occupied floors — EACH window gets its own material ──
       if (isOcc) {
         const winColor = c?.color ?? 0x34d399;
-        const winMat   = new THREE.MeshStandardMaterial({
-          color: winColor, emissive: new THREE.Color(winColor), emissiveIntensity: 0.8
-        });
-        const darkWinMat = new THREE.MeshStandardMaterial({
-          color: 0x0a0f1e, emissive: new THREE.Color(0x0a0f1e), emissiveIntensity: 0.1
-        });
 
-        // 3 rows of windows per side
         for (let row = 0; row < 3; row++) {
           const wy = baseY + 0.5 + row * 0.75;
-          // Front & back
+
+          // Front windows
           for (let w = -1; w <= 1; w++) {
-            const isLit = Math.random() > 0.3;
-            const wm    = isLit ? winMat : darkWinMat;
-            const wg    = new THREE.BoxGeometry(0.7, 0.5, 0.06);
-            const mesh  = new THREE.Mesh(wg, wm);
+            const lit = Math.random() > 0.3;
+            const winCol = lit ? winColor : 0x0a0f1e;
+            const wg = new THREE.BoxGeometry(0.7, 0.5, 0.06);
+            const wm = makeMat({ color: winCol, roughness: lit ? 0.1 : 0.9, metalness: lit ? 0.5 : 0.0 });
+            const mesh = new THREE.Mesh(wg, wm);
             mesh.position.set(w * 1.3, wy, tier.halfD + 0.09);
-            mesh.userData.isTower = true; scene.add(mesh);
+            addTowerObj(mesh);
 
-            // Back window — new mesh with same material
-            const backFront = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.5, 0.06), wm);
-            backFront.position.set(w * 1.3, wy, -tier.halfD - 0.09);
-            backFront.userData.isTower = true; scene.add(backFront);
+            // Back window — separate material
+            const bwm = makeMat({ color: winCol, roughness: lit ? 0.1 : 0.9, metalness: lit ? 0.5 : 0.0 });
+            const backMesh = new THREE.Mesh(wg, bwm);
+            backMesh.position.set(w * 1.3, wy, -tier.halfD - 0.09);
+            addTowerObj(backMesh);
           }
-          // Sides
-          for (let w = -1; w <= 1; w++) {
-            const isLit = Math.random() > 0.3;
-            const wm    = isLit ? winMat : darkWinMat;
-            const wg    = new THREE.BoxGeometry(0.06, 0.5, 0.7);
-            const mesh  = new THREE.Mesh(wg, wm);
-            mesh.position.set(tier.halfW + 0.09, wy, w * 1.3);
-            mesh.userData.isTower = true; scene.add(mesh);
 
-            // Back side window — new mesh with same material
-            const backSide = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.5, 0.7), wm);
-            backSide.position.set(-tier.halfW - 0.09, wy, w * 1.3);
-            backSide.userData.isTower = true; scene.add(backSide);
+          // Side windows
+          for (let w = -1; w <= 1; w++) {
+            const lit = Math.random() > 0.3;
+            const winCol = lit ? winColor : 0x0a0f1e;
+            const wg = new THREE.BoxGeometry(0.06, 0.5, 0.7);
+            const wm = makeMat({ color: winCol, roughness: lit ? 0.1 : 0.9, metalness: lit ? 0.5 : 0.0 });
+            const mesh = new THREE.Mesh(wg, wm);
+            mesh.position.set(tier.halfW + 0.09, wy, w * 1.3);
+            addTowerObj(mesh);
+
+            // Back side window
+            const bwm = makeMat({ color: winCol, roughness: lit ? 0.1 : 0.9, metalness: lit ? 0.5 : 0.0 });
+            const backMesh = new THREE.Mesh(wg, bwm);
+            backMesh.position.set(-tier.halfW - 0.09, wy, w * 1.3);
+            addTowerObj(backMesh);
           }
         }
       }
     }
   });
 
-  // ── Rooftop structure ───────────────────────────────────────────────────
-  const roofY    = 1.0 + 11 * FLOOR_HEIGHT + 0.2;
-  const roofGeo  = new THREE.BoxGeometry(5.6, 0.4, 5.6);
-  const roofMat  = new THREE.MeshStandardMaterial({ color: 0x2a2f45, roughness: 0.8 });
-  const roof     = new THREE.Mesh(roofGeo, roofMat);
+  // ── Rooftop ─────────────────────────────────────────────────────────────
+  const roofY = 1.0 + 11 * FLOOR_HEIGHT + 0.2;
+  const roofGeo = new THREE.BoxGeometry(5.6, 0.4, 5.6);
+  const roofMat = makeMat({ color: 0x2a2f45, roughness: 0.8 });
+  const roof = new THREE.Mesh(roofGeo, roofMat);
   roof.position.set(0, roofY, 0);
   roof.castShadow = true;
-  roof.userData.isTower = true; scene.add(roof);
+  addTowerObj(roof);
 
-  // Rooftop mechanical box
+  // Mechanical box
   const mechGeo = new THREE.BoxGeometry(1.5, 1.0, 1.5);
-  const mechMat = new THREE.MeshStandardMaterial({ color: 0x3a3f55, roughness: 0.7 });
+  const mechMat = makeMat({ color: 0x3a3f55, roughness: 0.7 });
   const mech = new THREE.Mesh(mechGeo, mechMat);
   mech.position.set(0, roofY + 0.7, 0);
   mech.castShadow = true;
-  mech.userData.isTower = true; scene.add(mech);
+  addTowerObj(mech);
 
-  // ── Spire ──────────────────────────────────────────────────────────────
-  const spireH   = 5;
+  // ── Spire ────────────────────────────────────────────────────────────────
+  const spireH  = 5;
   const spireGeo = new THREE.ConeGeometry(0.25, spireH, 6);
-  const spire    = new THREE.Mesh(spireGeo, matSpire);
+  const spireMat = makeMat({ color: 0xfbbf24, metalness: 0.9, roughness: 0.15 });
+  const spire    = new THREE.Mesh(spireGeo, spireMat);
   spire.position.set(0, roofY + 1.0 + spireH / 2, 0);
   spire.castShadow = true;
-  spire.userData.isTower = true; scene.add(spire);
+  addTowerObj(spire);
 
-  // Beacon light on spire
+  // Beacon
   const beacon = new THREE.PointLight(0xfbbf24, 2, 25);
   beacon.position.set(0, roofY + 1.0 + spireH, 0);
-  beacon.userData.isTower = true; scene.add(beacon);
+  addTowerObj(beacon);
 
-  // ── Entrance pillars ───────────────────────────────────────────────────
+  // ── Entrance pillars ─────────────────────────────────────────────────────
   const pillarGeo = new THREE.BoxGeometry(0.4, 3, 0.4);
-  const pillarMat = new THREE.MeshStandardMaterial({ color: 0x4a5070, metalness: 0.5, roughness: 0.4 });
-  [[1.5, 1.5, baseD / 2 + 0.5], [-1.5, 1.5, baseD / 2 + 0.5]].forEach(([x, y, z]) => {
-    const p = new THREE.Mesh(pillarGeo, pillarMat);
-    p.position.set(x, y, z); p.castShadow = true;
-    p.userData.isTower = true; scene.add(p);
+  [[1.5, baseD / 2 + 0.5], [-1.5, baseD / 2 + 0.5]].forEach(([x, z]) => {
+    const pMat = makeMat({ color: 0x4a5070, metalness: 0.5, roughness: 0.4 });
+    const p = new THREE.Mesh(pillarGeo, pMat);
+    p.position.set(x, 1.5, z); p.castShadow = true;
+    addTowerObj(p);
   });
 
-  // ── Surrounding buildings (smaller context) ─────────────────────────────
+  // ── Surrounding buildings ────────────────────────────────────────────────
   const surroundingBuildings = [
     { x: -12, z: -8,  w: 4, h: 10, d: 4  },
     { x:  12, z: -6,  w: 3, h: 14, d: 5  },
@@ -299,68 +303,63 @@ function createTower() {
   ];
   surroundingBuildings.forEach(b => {
     const bGeo = new THREE.BoxGeometry(b.w, b.h, b.d);
-    const bMat = new THREE.MeshStandardMaterial({ color: 0x1e2235, roughness: 0.9 });
+    const bMat = makeMat({ color: 0x1e2235, roughness: 0.9 });
     const bMesh = new THREE.Mesh(bGeo, bMat);
     bMesh.position.set(b.x, b.h / 2, b.z);
     bMesh.castShadow = true; bMesh.receiveShadow = true;
-    bMesh.userData.isTower = true; scene.add(bMesh);
+    addTowerObj(bMesh);
 
-    // Tiny window lights
-    const tinyWinMat = new THREE.MeshStandardMaterial({
-      color: 0xfbbf24, emissive: new THREE.Color(0xfbbf24), emissiveIntensity: 0.5
-    });
+    // Window lights
     for (let wy = 1.5; wy < b.h - 1; wy += 1.8) {
       for (let wx = -1; wx <= 1; wx++) {
         if (Math.random() > 0.5) {
           const wg = new THREE.BoxGeometry(0.5, 0.6, 0.05);
-          const wm = new THREE.Mesh(wg, Math.random() > 0.6 ? tinyWinMat :
-            new THREE.MeshStandardMaterial({ color: 0x0a0f1e }));
+          const isWarm = Math.random() > 0.6;
+          const wColor = isWarm ? 0xfbbf24 : 0x88bbee;
+          const wm = makeMat({ color: wColor, roughness: 0.3, metalness: 0.2 });
           const wMesh = new THREE.Mesh(wg, wm);
           wMesh.position.set(b.x + wx * 1.2, wy, b.z + b.d / 2 + 0.03);
-          wMesh.userData.isTower = true; scene.add(wMesh);
+          addTowerObj(wMesh);
         }
       }
     }
   });
 
-  // ── Landscape trees ────────────────────────────────────────────────────
+  // ── Trees ────────────────────────────────────────────────────────────────
   const treePositions = [
     [-6, 0, baseD / 2 + 4], [6, 0, baseD / 2 + 4],
     [-baseW / 2 - 3, 0, 0], [baseW / 2 + 3, 0, 0],
   ];
-  treePositions.forEach(([tx, ty, tz]) => {
+  treePositions.forEach(([tx, , tz]) => {
     const trunkGeo = new THREE.CylinderGeometry(0.15, 0.2, 2, 6);
-    const trunkMat = new THREE.MeshStandardMaterial({ color: 0x3d2b1f });
+    const trunkMat = makeMat({ color: 0x3d2b1f });
     const trunk    = new THREE.Mesh(trunkGeo, trunkMat);
     trunk.position.set(tx, 1, tz); trunk.castShadow = true;
-    trunk.userData.isTower = true; scene.add(trunk);
+    addTowerObj(trunk);
 
     const canopyGeo = new THREE.SphereGeometry(1.2, 8, 6);
-    const canopyMat = new THREE.MeshStandardMaterial({ color: 0x1a3a2a, roughness: 0.9 });
+    const canopyMat = makeMat({ color: 0x1a3a2a, roughness: 0.9 });
     const canopy    = new THREE.Mesh(canopyGeo, canopyMat);
     canopy.position.set(tx, 2.8, tz); canopy.castShadow = true;
-    canopy.userData.isTower = true; scene.add(canopy);
+    addTowerObj(canopy);
   });
 
-  // ── Stars ──────────────────────────────────────────────────────────────
+  // ── Stars ────────────────────────────────────────────────────────────────
   const starGeo = new THREE.BufferGeometry();
   const starPos = new Float32Array(3000);
   for (let i = 0; i < 3000; i++) starPos[i] = (Math.random() - 0.5) * 200;
   starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 1));
   const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.15, transparent: true, opacity: 0.7 });
   const stars   = new THREE.Points(starGeo, starMat);
-  stars.userData.isTower = true; scene.add(stars);
+  addTowerObj(stars);
 }
-
-// ─── Starfield ────────────────────────────────────────────────────────────────
-// (handled inline in createTower above)
 
 // ─── Companies ────────────────────────────────────────────────────────────────
 function loadCompanies() {
   try {
     const saved = localStorage.getItem('pollen-towers-companies');
     if (saved) { companies = JSON.parse(saved); return; }
-  } catch (e) { /* ignore corrupt data */ }
+  } catch (e) {}
 
   companies = [
     { id: 1, name: 'Nexus Research',  brief: 'AI-powered market research and competitive analysis for startups.',
@@ -505,15 +504,14 @@ function setupEvents() {
     }
   });
 
-  // Load saved key
   try {
     const saved = localStorage.getItem('pollen-towers-pollen-key');
     if (saved) { pollenKey = saved; connectBtn.textContent = '✓ Connected'; }
   } catch(e) {}
 
-  // Canvas click → select floor (only when modal closed)
+  // Canvas click → select floor (only when modal is CLOSED)
   canvas.addEventListener('click', e => {
-    if (companyModal.hidden) return;
+    if (!companyModal.hidden) return;  // FIX: modal open = ignore clicks
     mouse.x =  (e.clientX / window.innerWidth)  * 2 - 1;
     mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
     raycaster.setFromCamera(mouse, camera);
@@ -521,23 +519,30 @@ function setupEvents() {
     if (hits.length) goToFloor(hits[0].object.userData.floor);
   });
 
-  // Hover highlight
+  // Hover highlight — store original colors to restore later
+  const originalEmissive = new WeakMap();
   canvas.addEventListener('mousemove', e => {
     if (!companyModal.hidden) return;
     mouse.x =  (e.clientX / window.innerWidth)  * 2 - 1;
     mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
     raycaster.setFromCamera(mouse, camera);
     const hits = raycaster.intersectObjects(floorMeshes);
+
     if (hoveredFloor) {
-      hoveredFloor.material.emissiveIntensity = hoveredFloor.userData.isOccupied ? 0.2 : 0;
-    }
-    if (hits.length) {
-      hoveredFloor = hits[0].object;
-      hoveredFloor.material.emissiveIntensity = 0.5;
-      canvas.style.cursor = 'pointer';
-    } else {
+      // Restore original color
+      const orig = originalEmissive.get(hoveredFloor);
+      if (orig) hoveredFloor.material.color.setHex(orig);
       hoveredFloor = null;
       canvas.style.cursor = 'grab';
+    }
+
+    if (hits.length) {
+      const floor = hits[0].object;
+      hoveredFloor = floor;
+      // Store original, then brighten
+      if (!originalEmissive.has(floor)) originalEmissive.set(floor, floor.material.color.getHex());
+      floor.material.color.setHex(0x7799cc);
+      canvas.style.cursor = 'pointer';
     }
   });
 
@@ -566,21 +571,18 @@ function setupEvents() {
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  // ── Keyboard ──────────────────────────────────────────────────────────────
-  // NOTE: Arrow keys navigate floors (↑ = higher floor, ↓ = lower floor).
-  // When modal is open they are blocked from navigating the tower.
+  // Keyboard
   window.addEventListener('keydown', e => {
     const modalOpen = !companyModal.hidden;
     if (modalOpen) {
       if (e.key === 'Escape') closeModal();
-      return; // Don't navigate floors while modal is open
+      return;
     }
     if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') { e.preventDefault(); goToFloor(currentFloor + 1); }
     if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') { e.preventDefault(); goToFloor(currentFloor - 1); }
     if (e.key === 'r' || e.key === 'R') toggleAutoRotate();
   });
 
-  // Rent button
   rentBtn.addEventListener('click', handleRent);
   document.getElementById('company-name').addEventListener('keydown', e => { if (e.key === 'Enter') handleRent(); });
   document.getElementById('company-brief').addEventListener('keydown', e => { if (e.key === 'Enter' && e.ctrlKey) handleRent(); });
@@ -735,6 +737,7 @@ try {
   render();
   renderDirectory();
   goToFloor(0);
+  console.log('Pollen Towers initialized —', companies.length, 'companies, tower rendered');
 } catch (e) {
   console.error('Init failed:', e);
   appEl.innerHTML = `<div style="padding:40px;color:#f87171;font-family:sans-serif;">
