@@ -317,9 +317,11 @@ html, body {
   inset: 0;
   background: rgba(0,0,0,0.7);
   backdrop-filter: blur(4px);
+  z-index: 1;
 }
 .modal-card {
   position: relative;
+  z-index: 2;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -331,18 +333,16 @@ html, body {
   scrollbar-color: var(--border) transparent;
   box-shadow: 0 20px 60px rgba(0,0,0,0.5);
 }
-.modal-card::-webkit-scrollbar { width: 4px; }
-.modal-card::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-
 .modal-close {
   position: absolute;
   top: 12px;
   right: 12px;
+  z-index: 3;
   background: var(--surface-2);
   border: 1px solid var(--border);
   color: var(--text-muted);
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   cursor: pointer;
   font-size: 14px;
@@ -351,7 +351,10 @@ html, body {
   justify-content: center;
   transition: all 0.15s;
 }
-.modal-close:hover { color: var(--text); border-color: var(--text-muted); }
+.modal-close:hover { color: var(--text); border-color: var(--text-muted); background: var(--border); }
+.modal-card::-webkit-scrollbar { width: 4px; }
+.modal-card::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
 
 .office-detail h3 { font-size: 20px; margin-bottom: 4px; color: var(--text); }
 .office-detail .office-floor { color: var(--accent); font-size: 12px; margin-bottom: 16px; font-weight: 500; }
