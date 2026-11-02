@@ -207,10 +207,10 @@ function createTower() {
       if (isOcc) {
         const winColor = c?.color ?? 0x34d399;
         const winMat   = new THREE.MeshStandardMaterial({
-          color: winColor, emissive: winColor, emissiveIntensity: 0.8
+          color: winColor, emissive: new THREE.Color(winColor), emissiveIntensity: 0.8
         });
         const darkWinMat = new THREE.MeshStandardMaterial({
-          color: 0x0a0f1e, emissive: 0x0a0f1e, emissiveIntensity: 0.1
+          color: 0x0a0f1e, emissive: new THREE.Color(0x0a0f1e), emissiveIntensity: 0.1
         });
 
         // 3 rows of windows per side
@@ -307,7 +307,7 @@ function createTower() {
 
     // Tiny window lights
     const tinyWinMat = new THREE.MeshStandardMaterial({
-      color: 0xfbbf24, emissive: 0xfbbf24, emissiveIntensity: 0.5
+      color: 0xfbbf24, emissive: new THREE.Color(0xfbbf24), emissiveIntensity: 0.5
     });
     for (let wy = 1.5; wy < b.h - 1; wy += 1.8) {
       for (let wx = -1; wx <= 1; wx++) {
