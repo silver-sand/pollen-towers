@@ -1,609 +1,664 @@
-/**
- * StegoGauge — Main Application
- *
- * HIDE mode: encode a secret into a dusk skyline SVG, render to PNG.
- * SEEK mode (Gauge): blind pixel detector — zero Pollen cost.
- * SEEK mode (Vision): AI vision seeker via Pollinations API (BYOP).
- *
- * Engine imports (browser-compatible copies in /engine/)
- */
+// Pollen Towers — AI-Run Companies
+// Quest #17999
 
-import { encodeSkylineSvg, normaliseSecret } from './engine/skyline.js';
-import { analysePixels } from './engine/gauge.js';
-import { similarity } from './engine/lattice.js';
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js';
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
+// ─── Config ───────────────────────────────────────────────────────────────────
+const FLOOR_HEIGHT = 3;
+const FLOOR_SIZE = 4;
+const TOTAL_FLOORS = 12;
+const POLLEN_API = 'https://api.pollinations.ai';
+const POLLINATIONS_KEY = import.meta.env?.POLLEN_KEY || '';
 
-function showToast(message, type = 'info') {
-  const container = document.querySelector('.toast-container') || createToastContainer();
-  const toast = document.createElement('div');
-  toast.className = `toast ${type}`;
-  toast.textContent = message;
-  container.appendChild(toast);
-  setTimeout(() => toast.remove(), 4000);
+// ─── State ────────────────────────────────────────────────────────────────────
+let currentFloor = 0;
+let autoRotate = false;
+let pollenKey = '';
+let companies = [];
+let decisions = [];
+let selectedCompany = null;
+let raycaster, mouse, hoveredFloor = null;
+
+// ─── DOM refs ─────────────────────────────────────────────────────────────────
+const canvas = document.getElementById('tower-canvas');
+const floorLabel = document.getElementById('floor-label');
+const prevBtn = document.getElementById('prev-floor');
+const nextBtn = document.getElementById('next-floor');
+const floorDots = document.getElementById('floor-dots');
+const rotateBtn = document.getElementById('rotate-btn');
+const connectBtn = document.getElementById('connect-btn');
+const decisionPanel = document.getElementById('decision-queue');
+const decisionCount = document.getElementById('decision-count');
+const decisionList = document.getElementById('decision-list');
+const companyGrid = document.getElementById('company-grid');
+const searchInput = document.getElementById('search-input');
+const sortSelect = document.getElementById('sort-select');
+const rentBtn = document.getElementById('rent-btn');
+const rentStatus = document.getElementById('rent-status');
+const companyModal = document.getElementById('office-modal');
+const officeDetail = document.getElementById('office-detail');
+const toastContainer = document.getElementById('toast-container');
+
+// ─── Three.js setup ───────────────────────────────────────────────────────────
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0d0f18);
+scene.fog = new THREE.FogExp2(0x0d0f18, 0.018);
+
+const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 200);
+camera.position.set(14, 12, 14);
+
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const controls = new OrbitControls(camera, canvas);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.minDistance = 8;
+controls.maxDistance = 40;
+controls.maxPolarAngle = Math.PI * 0.85;
+controls.target.set(0, 15, 0);
+
+// ─── Lights ───────────────────────────────────────────────────────────────────
+const ambientLight = new THREE.AmbientLight(0x404060, 0.6);
+scene.add(ambientLight);
+
+const dirLight = new THREE.DirectionalLight(0xffeedd, 1.0);
+dirLight.position.set(10, 25, 10);
+dirLight.castShadow = true;
+dirLight.shadow.mapSize.set(2048, 2048);
+dirLight.shadow.camera.near = 1;
+dirLight.shadow.camera.far = 60;
+dirLight.shadow.camera.left = -20;
+dirLight.shadow.camera.right = 20;
+dirLight.shadow.camera.top = 35;
+dirLight.shadow.camera.bottom = -5;
+scene.add(dirLight);
+
+const pointLight = new THREE.PointLight(0xfbbf24, 0.5, 30);
+pointLight.position.set(-5, 20, 5);
+scene.add(pointLight);
+
+// ─── Raycaster ────────────────────────────────────────────────────────────────
+raycaster = new THREE.Raycaster();
+mouse = new THREE.Vector2();
+
+// ─── Build tower ──────────────────────────────────────────────────────────────
+const floorMeshes = [];
+const floorGroup = new THREE.Group();
+scene.add(floorGroup);
+
+function createTower() {
+  // Foundation / ground
+  const groundGeo = new THREE.BoxGeometry(20, 0.5, 20);
+  const groundMat = new THREE.MeshStandardMaterial({ color: 0x1a1a2e, roughness: 0.9 });
+  const ground = new THREE.Mesh(groundGeo, groundMat);
+  ground.position.y = -0.25;
+  ground.receiveShadow = true;
+  scene.add(ground);
+
+  // Elevator core (central column)
+  const coreGeo = new THREE.BoxGeometry(1.2, TOTAL_FLOORS * FLOOR_HEIGHT, 1.2);
+  const coreMat = new THREE.MeshStandardMaterial({
+    color: 0x2a2f45,
+    roughness: 0.3,
+    metalness: 0.8,
+  });
+  const core = new THREE.Mesh(coreGeo, coreMat);
+  core.position.y = (TOTAL_FLOORS * FLOOR_HEIGHT) / 2;
+  core.castShadow = true;
+  core.receiveShadow = true;
+  scene.add(core);
+
+  // Create floors
+  for (let i = 0; i < TOTAL_FLOORS; i++) {
+    const isOccupied = i < companies.length;
+    const company = companies[i];
+    const color = isOccupied
+      ? (company.color || 0x34d399)
+      : 0x1e2235;
+
+    // Floor slab
+    const floorGeo = new THREE.BoxGeometry(FLOOR_SIZE, 0.3, FLOOR_SIZE);
+    const floorMat = new THREE.MeshStandardMaterial({
+      color,
+      roughness: 0.5,
+      metalness: isOccupied ? 0.3 : 0.1,
+      emissive: isOccupied ? color : 0x000000,
+      emissiveIntensity: isOccupied ? 0.15 : 0,
+    });
+    const floorMesh = new THREE.Mesh(floorGeo, floorMat);
+    const y = 0.15 + i * FLOOR_HEIGHT;
+    floorMesh.position.y = y;
+    floorMesh.castShadow = true;
+    floorMesh.receiveShadow = true;
+    floorMesh.userData = { floor: i, isOccupied, company };
+    floorGroup.add(floorMesh);
+    floorMeshes.push(floorMesh);
+
+    if (isOccupied && company) {
+      // Windows / light strips on occupied floors
+      const windowMat = new THREE.MeshStandardMaterial({
+        color: 0xfbbf24,
+        emissive: 0xfbbf24,
+        emissiveIntensity: 0.6,
+      });
+
+      for (let side = 0; side < 4; side++) {
+        for (let w = 0; w < 3; w++) {
+          const winGeo = new THREE.BoxGeometry(0.6, 0.8, 0.05);
+          const win = new THREE.Mesh(winGeo, windowMat);
+          const offset = (w - 1) * 1.1;
+          if (side === 0) { win.position.set(offset, y + 0.5, FLOOR_SIZE / 2 + 0.03); }
+          else if (side === 1) { win.position.set(offset, y + 0.5, -FLOOR_SIZE / 2 - 0.03); }
+          else if (side === 2) { win.position.set(FLOOR_SIZE / 2 + 0.03, y + 0.5, offset); win.rotation.y = Math.PI / 2; }
+          else { win.position.set(-FLOOR_SIZE / 2 - 0.03, y + 0.5, offset); win.rotation.y = Math.PI / 2; }
+          floorGroup.add(win);
+        }
+      }
+
+      // Roof overhang
+      const roofGeo = new THREE.BoxGeometry(FLOOR_SIZE + 0.4, 0.15, FLOOR_SIZE + 0.4);
+      const roofMat = new THREE.MeshStandardMaterial({ color: 0x2a2f45, roughness: 0.6 });
+      const roof = new THREE.Mesh(roofGeo, roofMat);
+      roof.position.y = y + 1.0;
+      roof.castShadow = true;
+      floorGroup.add(roof);
+    }
+  }
+
+  // Spire on top
+  const spireGeo = new THREE.ConeGeometry(0.3, 3, 8);
+  const spireMat = new THREE.MeshStandardMaterial({ color: 0xfbbf24, metalness: 0.8, roughness: 0.2 });
+  const spire = new THREE.Mesh(spireGeo, spireMat);
+  spire.position.y = TOTAL_FLOORS * FLOOR_HEIGHT + 1.5;
+  spire.castShadow = true;
+  scene.add(spire);
+
+  // Spire light
+  const spireLight = new THREE.PointLight(0xfbbf24, 1, 15);
+  spireLight.position.copy(spire.position);
+  scene.add(spireLight);
 }
 
-function createToastContainer() {
-  const el = document.createElement('div');
-  el.className = 'toast-container';
-  document.body.appendChild(el);
-  return el;
+// ─── Starfield ────────────────────────────────────────────────────────────────
+function createStars() {
+  const starGeo = new THREE.BufferGeometry();
+  const positions = new Float32Array(2000);
+  for (let i = 0; i < 2000; i++) {
+    positions[i] = (Math.random() - 0.5) * 150;
+  }
+  starGeo.setAttribute('position', new THREE.BufferAttribute(positions, 1));
+  const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.1, transparent: true, opacity: 0.6 });
+  scene.add(new THREE.Points(starGeo, starMat));
 }
 
-function setStatus(el, status) {
-  if (!el) return;
-  el.style.display = status ? 'block' : 'none';
-  el.className = `status-msg ${status}`;
-  el.innerHTML = status === 'ok' ? `✓ ${el.dataset.ok || ''}`
-    : status === 'err' ? `✗ ${el.dataset.err || ''}`
-    : `<span class="spinner"></span> ${el.dataset.info || ''}`;
-}
-
-function parsePollenKey() {
-  // Check sessionStorage first (from <polli-connect> change event)
-  const session = sessionStorage.getItem('pollinations-api-key');
-  if (session) return session;
-  // Check element for legacy apps
-  const el = document.getElementById('polli-connect');
-  if (el?.apiKey) return el.apiKey;
-  // Fallback: check URL param (user-pasted key)
-  return new URLSearchParams(window.location.search).get('pollen') || '';
-}
-
-// ─── State ───────────────────────────────────────────────────────────────────
-
-let currentSecret = '';
-let currentSvg = '';
-let currentCanvasUrl = '';
-let seekMode = 'gauge'; // 'gauge' | 'vision'
-let apiKey = '';
-
-// ─── DOM refs ────────────────────────────────────────────────────────────────
-
-const $ = (id) => document.getElementById(id);
-
-// Hide mode elements
-const secretInput = $('secret-input');
-const stepSlider = $('step-slider');
-const stepValue = $('step-value');
-const encodeBtn = $('encode-btn');
-const encodeStatus = $('encode-status');
-const skylinePreview = $('skyline-preview');
-const skylineImg = $('skyline-img');
-const skylineSvgWrap = $('skyline-svg-wrap');
-const skylineSvgCode = $('skyline-svg-code');
-const encodeMeta = $('encode-meta');
-const encodeActions = $('encode-actions');
-const downloadPng = $('download-png');
-const copyLink = $('copy-link');
-
-// Seek mode elements
-const dropZone = $('drop-zone');
-const fileInput = $('file-input');
-const urlInput = $('url-input');
-const loadUrlBtn = $('load-url-btn');
-const gaugeBtn = $('gauge-btn');
-const visionBtn = $('vision-btn');
-const analyzeBtn = $('analyze-btn');
-const analyzeStatus = $('analyze-status');
-const resultPreview = $('result-preview');
-const resultImg = $('result-img');
-const resultOverlay = $('result-overlay');
-const overlayCanvas = $('overlay-canvas');
-const resultStats = $('result-stats');
-const scoreBar = $('score-bar');
-const scoreVal = $('score-val');
-const detectionResult = $('detection-result');
-const decodedBox = $('decoded-box');
-const decodedText = $('decoded-text');
-const visionBox = $('vision-box');
-const visionText = $('vision-text');
-const detailDetails = $('detail-details');
-const detectionDetail = $('detection-detail');
-
-// ─── Init ────────────────────────────────────────────────────────────────────
-
+// ─── Initialize ───────────────────────────────────────────────────────────────
 function init() {
-  // Load Pollen key from connect component
-  const connectEl = document.getElementById('polli-connect');
-  if (connectEl) {
-    connectEl.addEventListener('change', (e) => {
-      apiKey = e.detail?.apiKey || e.target?.apiKey || '';
-      sessionStorage.setItem('pollinations-api-key', apiKey);
-      updateAuthStatus();
-    });
-    // Try to read existing key
-    if (connectEl.apiKey) {
-      apiKey = connectEl.apiKey;
-      sessionStorage.setItem('pollinations-api-key', apiKey);
-    }
-  }
-  apiKey = parsePollenKey();
-  updateAuthStatus();
-
-  // Slider
-  stepSlider.addEventListener('input', () => {
-    stepValue.textContent = stepSlider.value;
-  });
-
-  // Encode button
-  encodeBtn.addEventListener('click', handleEncode);
-
-  // Download PNG
-  downloadPng.addEventListener('click', () => {
-    if (!currentCanvasUrl) return;
-    const a = document.createElement('a');
-    a.href = currentCanvasUrl;
-    a.download = `stego-gauge-${Date.now()}.png`;
-    a.click();
-  });
-
-  // Copy link
-  copyLink.addEventListener('click', async () => {
-    if (!currentSvg) return;
-    // Encode SVG as data URL for sharing
-    const blob = new Blob([currentSvg], { type: 'image/svg+xml' });
-    const url = URL.createObjectURL(blob);
-    try {
-      await navigator.clipboard.writeText(url);
-      showToast('SVG copied to clipboard', 'success');
-    } catch {
-      showToast('Failed to copy', 'error');
-    }
-    setTimeout(() => URL.revokeObjectURL(url), 5000);
-  });
-
-  // Drop zone
-  dropZone.addEventListener('click', () => fileInput.click());
-  dropZone.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    dropZone.classList.add('drag-over');
-  });
-  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
-  dropZone.addEventListener('drop', (e) => {
-    e.preventDefault();
-    dropZone.classList.remove('drag-over');
-    const file = e.dataTransfer.files[0];
-    if (file && file.type.startsWith('image/')) handleImageFile(file);
-  });
-  fileInput.addEventListener('change', (e) => {
-    if (e.target.files[0]) handleImageFile(e.target.files[0]);
-  });
-
-  // URL input
-  loadUrlBtn.addEventListener('click', async () => {
-    const url = urlInput.value.trim();
-    if (!url) return;
-    try {
-      await loadImageFromUrl(url);
-    } catch (err) {
-      showToast('Failed to load image', 'error');
-    }
-  });
-
-  // Mode toggle
-  gaugeBtn.addEventListener('click', () => setSeekMode('gauge'));
-  visionBtn.addEventListener('click', () => setSeekMode('vision'));
-
-  // Analyze button
-  analyzeBtn.addEventListener('click', handleAnalyze);
-
-  // Load demo image on start
-  loadDemoImage();
+  createStars();
+  loadCompanies();
+  createTower();
+  buildFloorDots();
+  updateNav();
+  setupEvents();
+  render();
 }
 
-// ─── Auth ────────────────────────────────────────────────────────────────────
-
-function updateAuthStatus() {
-  const connectEl = document.getElementById('polli-connect');
-  const statusEl = document.getElementById('auth-status-pill');
-  if (!statusEl) return;
-  if (apiKey) {
-    statusEl.textContent = '● Connected';
-    statusEl.style.color = 'var(--success)';
-  } else {
-    statusEl.textContent = '○ Offline Mode';
-    statusEl.style.color = 'var(--text-muted)';
-  }
-}
-
-// ─── Seek Mode Toggle ────────────────────────────────────────────────────────
-
-function setSeekMode(mode) {
-  seekMode = mode;
-  gaugeBtn.classList.toggle('active', mode === 'gauge');
-  visionBtn.classList.toggle('active', mode === 'vision');
-  analyzeBtn.disabled = !currentImageData;
-}
-
-// ─── Image Handling ───────────────────────────────────────────────────────────
-
-let currentImageData = null;
-
-function handleImageFile(file) {
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    const img = new Image();
-    img.onload = () => {
-      currentImageData = { src: e.target.result, width: img.naturalWidth, height: img.naturalHeight };
-      displaySeekImage();
-      analyzeBtn.disabled = false;
-      showToast('Image loaded', 'success');
-    };
-    img.src = e.target.result;
-  };
-  reader.readAsDataURL(file);
-}
-
-async function loadImageFromUrl(url) {
-  // Fetch as blob to avoid CORS issues with <img>
-  const resp = await fetch(url);
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-  const blob = await resp.blob();
-  const reader = new FileReader();
-  reader.onload = () => {
-    const img = new Image();
-    img.onload = () => {
-      currentImageData = { src: reader.result, width: img.naturalWidth, height: img.naturalHeight };
-      displaySeekImage();
-      analyzeBtn.disabled = false;
-    };
-    img.src = reader.result;
-  };
-  reader.readAsDataURL(blob);
-}
-
-function displaySeekImage() {
-  if (!currentImageData) return;
-  resultImg.src = currentImageData.src;
-  resultPreview.classList.remove('hidden');
-  resultOverlay.classList.add('hidden');
-  resultStats.classList.add('hidden');
-}
-
-function loadDemoImage() {
-  // Generate a demo skyline with known secret
-  const demoSecret = 'MEET AT DAWN';
-  const { svg } = encodeSkylineSvg(demoSecret);
-  currentSvg = svg;
-  currentSecret = demoSecret;
-
-  // Render to canvas
-  const canvas = $('render-canvas');
-  const ctx = canvas.getContext('2d');
-  const img = new Image();
-  img.onload = () => {
-    canvas.width = img.naturalWidth;
-    canvas.height = img.naturalHeight;
-    ctx.drawImage(img, 0, 0);
-    const dataUrl = canvas.toDataURL('image/png');
-    currentCanvasUrl = dataUrl;
-    currentImageData = { src: dataUrl, width: img.naturalWidth, height: img.naturalHeight };
-    displaySeekImage();
-    analyzeBtn.disabled = false;
-    // Show in seek preview
-    displaySeekImage();
-  };
-  img.src = `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svg)))}`;
-}
-
-// ─── Encode ──────────────────────────────────────────────────────────────────
-
-async function handleEncode() {
-  const secret = secretInput.value.trim();
-  if (!secret) {
-    setStatus(encodeStatus, 'err');
-    encodeStatus.dataset.err = 'Please enter a message';
+// ─── Companies ────────────────────────────────────────────────────────────────
+function loadCompanies() {
+  const saved = localStorage.getItem('pollen-towers-companies');
+  if (saved) {
+    companies = JSON.parse(saved);
     return;
   }
+  // Seed with demo companies
+  companies = [
+    { id: 1, name: 'Nexus Research', brief: 'AI-powered market research and competitive analysis for startups.', status: 'active', color: 0x34d399,
+      agents: ['ResearchBot', 'Analyst'], floor: 1,
+      jobs: [{ title: 'Competitive report for fintech sector', status: 'done' }, { title: 'Market sizing: AI dev tools', status: 'pending' }] },
+    { id: 2, name: 'CodeForge Studios', brief: 'Rapid prototyping and MVP development using agentic workflows.', status: 'active', color: 0x60a5fa,
+      agents: ['DevAgent', 'QA-Agent'], floor: 2,
+      jobs: [{ title: 'Build dashboard for SaaS client', status: 'pending' }, { title: 'API integration tests', status: 'done' }] },
+    { id: 3, name: 'GreenLeaf Analytics', brief: 'Sustainability metrics tracking and ESG reporting automation.', status: 'idle', color: 0x34d399,
+      agents: ['DataAgent', 'ReportBot'], floor: 3,
+      jobs: [{ title: 'Q4 ESG report generation', status: 'pending' }] },
+    { id: 4, name: 'LinguaBridge', brief: 'Real-time translation and localization for global content creators.', status: 'active', color: 0xf472b6,
+      agents: ['TranslateBot', 'CulturalAgent'], floor: 4,
+      jobs: [{ title: 'Translate blog into 5 languages', status: 'done' }, { title: 'Subtitling for YouTube channel', status: 'pending' }] },
+    { id: 5, name: 'FinStack AI', brief: 'Automated financial modeling and investment risk assessment.', status: 'active', color: 0xfbbf24,
+      agents: ['FinanceBot', 'RiskAgent'], floor: 5,
+      jobs: [{ title: 'Portfolio risk analysis', status: 'pending' }, { title: 'Monthly revenue forecast', status: 'done' }] },
+  ];
+  saveCompanies();
+}
 
-  encodeBtn.disabled = true;
-  setStatus(encodeStatus, 'info');
-  encodeStatus.dataset.info = 'Generating skyline...';
+function saveCompanies() {
+  localStorage.setItem('pollen-towers-companies', JSON.stringify(companies));
+}
 
-  try {
-    const step = parseInt(stepSlider.value);
-    const result = encodeSkylineSvg(secret, { step });
-    currentSvg = result.svg;
-    currentSecret = result.text;
-
-    // Render to canvas
-    const canvas = $('render-canvas');
-    const ctx = canvas.getContext('2d');
-    const img = new Image();
-
-    await new Promise((resolve, reject) => {
-      img.onload = resolve;
-      img.onerror = reject;
-      img.src = `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(result.svg)))}`;
-    });
-
-    canvas.width = img.naturalWidth;
-    canvas.height = img.naturalHeight;
-    ctx.drawImage(img, 0, 0);
-    currentCanvasUrl = canvas.toDataURL('image/png');
-
-    // Update UI
-    skylineImg.src = currentCanvasUrl;
-    skylinePreview.classList.remove('hidden');
-    skylineSvgCode.textContent = result.svg;
-    skylineSvgWrap.classList.remove('hidden');
-    encodeMeta.classList.remove('hidden');
-    encodeActions.classList.remove('hidden');
-
-    // Update meta
-    $('meta-symbols').textContent = result.text;
-    $('meta-buildings').textContent = result.plan.length;
-    $('meta-step').textContent = `${step}px`;
-    $('meta-size').textContent = `${canvas.width}×${canvas.height}`;
-
-    setStatus(encodeStatus, 'ok');
-    encodeStatus.dataset.ok = `Encoded ${result.text.length} symbols into ${result.plan.length} buildings`;
-
-    showToast('Skyline generated!', 'success');
-  } catch (err) {
-    setStatus(encodeStatus, 'err');
-    encodeStatus.dataset.err = err.message || 'Encoding failed';
-    showToast('Encoding failed', 'error');
-  } finally {
-    encodeBtn.disabled = false;
+// ─── Floor dots ───────────────────────────────────────────────────────────────
+function buildFloorDots() {
+  floorDots.innerHTML = '';
+  for (let i = TOTAL_FLOORS - 1; i >= 0; i--) {
+    const dot = document.createElement('div');
+    dot.className = 'dot' + (i < companies.length ? ' occupied' : '') + (i === currentFloor ? ' active' : '');
+    dot.title = `Floor ${i + 1}${i < companies.length ? ': ' + companies[i].name : ' (empty)'}`;
+    dot.addEventListener('click', () => goToFloor(i));
+    floorDots.appendChild(dot);
   }
 }
 
-// ─── Seek / Analyze ──────────────────────────────────────────────────────────
+function updateNav() {
+  floorLabel.textContent = `Floor ${currentFloor + 1}`;
+  prevBtn.disabled = currentFloor === 0;
+  nextBtn.disabled = currentFloor >= TOTAL_FLOORS - 1;
 
-async function handleAnalyze() {
-  if (!currentImageData) return;
+  document.querySelectorAll('.dot').forEach((d, i) => {
+    d.classList.toggle('active', TOTAL_FLOORS - 1 - i === currentFloor);
+  });
+}
 
-  analyzeBtn.disabled = true;
-  setStatus(analyzeStatus, 'info');
-  analyzeStatus.dataset.info = seekMode === 'gauge' ? 'Analyzing pixels...' : 'Sending to AI vision...';
+// ─── Navigation ───────────────────────────────────────────────────────────────
+function goToFloor(index) {
+  currentFloor = Math.max(0, Math.min(TOTAL_FLOORS - 1, index));
+  const targetY = currentFloor * FLOOR_HEIGHT + 2;
+  const startPos = camera.position.clone();
+  const startTarget = controls.target.clone();
+  const endTarget = new THREE.Vector3(0, targetY, 0);
+  const endPos = new THREE.Vector3(14, targetY + 5, 14);
+  const duration = 600;
+  const start = performance.now();
 
-  try {
-    if (seekMode === 'gauge') {
-      await analyzeWithGauge();
-    } else {
-      await analyzeWithVision();
+  function animateCamera(now) {
+    const t = Math.min((now - start) / duration, 1);
+    const ease = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+    camera.position.lerpVectors(startPos, endPos, ease);
+    controls.target.lerpVectors(startTarget, endTarget, ease);
+    controls.update();
+    if (t < 1) requestAnimationFrame(animateCamera);
+  }
+  requestAnimationFrame(animateCamera);
+  updateNav();
+  if (currentFloor < companies.length) {
+    selectedCompany = companies[currentFloor];
+    showOfficeDetail(selectedCompany);
+  }
+}
+
+// ─── Events ───────────────────────────────────────────────────────────────────
+function setupEvents() {
+  prevBtn.addEventListener('click', () => goToFloor(currentFloor - 1));
+  nextBtn.addEventListener('click', () => goToFloor(currentFloor + 1));
+  rotateBtn.addEventListener('click', toggleAutoRotate);
+
+  // BYOP connect
+  connectBtn.addEventListener('click', async () => {
+    if (pollenKey) {
+      pollenKey = '';
+      localStorage.removeItem('pollen-towers-pollen-key');
+      connectBtn.textContent = 'Connect Pollen';
+      toast('Pollen disconnected');
+      return;
     }
-  } catch (err) {
-    setStatus(analyzeStatus, 'err');
-    analyzeStatus.dataset.err = err.message || 'Analysis failed';
-    showToast('Analysis failed', 'error');
-  } finally {
-    analyzeBtn.disabled = false;
-  }
-}
-
-async function analyzeWithGauge() {
-  // Convert image data URL to raw pixels
-  const img = new Image();
-  await new Promise((resolve, reject) => {
-    img.onload = resolve;
-    img.onerror = reject;
-    img.src = currentImageData.src;
+    // Try polling the <polli-connect> component
+    const el = document.querySelector('polli-connect');
+    if (el) {
+      try {
+        const res = await el.authWithPollen();
+        if (res?.access_token) {
+          pollenKey = res.access_token;
+          localStorage.setItem('pollen-towers-pollen-key', pollenKey);
+          connectBtn.textContent = '✓ Connected';
+          toast('Pollen connected!');
+        }
+      } catch (e) {
+        // Fallback: prompt user
+        const key = prompt('Enter your Pollen API key (get one at enter.pollinations.ai/keys):');
+        if (key) {
+          pollenKey = key.trim();
+          localStorage.setItem('pollen-towers-pollen-key', pollenKey);
+          connectBtn.textContent = '✓ Connected';
+          toast('Pollen connected!');
+        }
+      }
+    } else {
+      const key = prompt('Enter your Pollen API key (get one at enter.pollinations.ai/keys):');
+      if (key) {
+        pollenKey = key.trim();
+        localStorage.setItem('pollen-towers-pollen-key', pollenKey);
+        connectBtn.textContent = '✓ Connected';
+        toast('Pollen connected!');
+      }
+    }
   });
 
-  const canvas = $('render-canvas');
-  const ctx = canvas.getContext('2d');
-  canvas.width = img.naturalWidth;
-  canvas.height = img.naturalHeight;
-  ctx.drawImage(img, 0, 0);
-
-  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const { data, width, height } = imageData;
-
-  // Run the blind detector
-  const result = analysePixels(data, width, height, 4);
-
-  // Update UI
-  resultStats.classList.remove('hidden');
-  scoreBar.style.width = `${Math.min(100, result.score * 100)}%`;
-  scoreVal.textContent = result.score.toFixed(3);
-
-  if (result.score >= 0.85) {
-    detectionResult.textContent = '✓ Message Detected';
-    detectionResult.className = 'result-badge pass';
-    decodedBox.classList.remove('hidden');
-    decodedText.textContent = result.text || '(empty)';
-  } else if (result.score >= 0.5) {
-    detectionResult.textContent = '~ Weak Signal';
-    detectionResult.className = 'result-badge warn';
-    if (result.text) {
-      decodedBox.classList.remove('hidden');
-      decodedText.textContent = result.text;
-    }
-  } else {
-    detectionResult.textContent = '✗ No Message Found';
-    detectionResult.className = 'result-badge fail';
-    decodedBox.classList.add('hidden');
+  // Load saved key
+  const saved = localStorage.getItem('pollen-towers-pollen-key');
+  if (saved) {
+    pollenKey = saved;
+    connectBtn.textContent = '✓ Connected';
   }
 
-  // Show details
-  detailDetails.classList.remove('hidden');
-  detectionDetail.innerHTML = `
-    <dl>
-      <dt>Objects found</dt><dd>${result.objects?.length ?? 0}</dt>
-      <dt>Ground row</dt><dd>${result.groundRow ?? '—'}</dt>
-      <dt>Fit step</dt><dd>${result.fit?.step?.toFixed(2) ?? '—'}</dt>
-      <dt>Snap rate</dt><dd>${result.fit?.snapRate?.toFixed(2) ?? '—'}</dt>
-      <dt>Residual</dt><dd>${result.fit?.residual?.toFixed(3) ?? '—'}</dt>
-      <dt>Reason</dt><dd>${result.reason}</dd>
-    </dl>
+  // Click on canvas
+  canvas.addEventListener('click', (e) => {
+    mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+    mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+    raycaster.setFromCamera(mouse, camera);
+    const hits = raycaster.intersectObjects(floorMeshes);
+    if (hits.length > 0) {
+      const idx = hits[0].object.userData.floor;
+      goToFloor(idx);
+    }
+  });
+
+  // Hover effect
+  canvas.addEventListener('mousemove', (e) => {
+    mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+    mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+    raycaster.setFromCamera(mouse, camera);
+    const hits = raycaster.intersectObjects(floorMeshes);
+    if (hoveredFloor) {
+      hoveredFloor.material.emissiveIntensity = hoveredFloor.userData.isOccupied ? 0.15 : 0;
+    }
+    if (hits.length > 0) {
+      hoveredFloor = hits[0].object;
+      hoveredFloor.material.emissiveIntensity = 0.4;
+      canvas.style.cursor = 'pointer';
+    } else {
+      hoveredFloor = null;
+      canvas.style.cursor = 'grab';
+    }
+  });
+
+  // Rent button
+  rentBtn.addEventListener('click', handleRent);
+
+  // Modal close
+  document.querySelectorAll('[data-close]').forEach(el => {
+    el.addEventListener('click', () => { companyModal.hidden = true; });
+  });
+
+  // Search & sort
+  searchInput.addEventListener('input', renderDirectory);
+  sortSelect.addEventListener('change', renderDirectory);
+
+  // Resize
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  // Keyboard
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowUp' || e.key === 'w') goToFloor(currentFloor - 1);
+    if (e.key === 'ArrowDown' || e.key === 's') goToFloor(currentFloor + 1);
+    if (e.key === 'Escape') { companyModal.hidden = true; }
+  });
+}
+
+// ─── Auto rotate ──────────────────────────────────────────────────────────────
+function toggleAutoRotate() {
+  autoRotate = !autoRotate;
+  controls.autoRotate = autoRotate;
+  controls.autoRotateSpeed = 1.5;
+  rotateBtn.textContent = autoRotate ? '⏸ Stop' : '↻ Auto';
+  rotateBtn.classList.toggle('btn-ghost', autoRotate);
+}
+
+// ─── Rendering ────────────────────────────────────────────────────────────────
+function render() {
+  requestAnimationFrame(render);
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+// ─── Directory ────────────────────────────────────────────────────────────────
+function renderDirectory() {
+  const query = searchInput.value.toLowerCase();
+  const sort = sortSelect.value;
+
+  let filtered = companies.filter(c =>
+    c.name.toLowerCase().includes(query) || c.brief.toLowerCase().includes(query)
+  );
+
+  filtered.sort((a, b) => {
+    if (sort === 'name') return a.name.localeCompare(b.name);
+    if (sort === 'floor') return a.floor - b.floor;
+    if (sort === 'status') return a.status.localeCompare(b.status);
+    return 0;
+  });
+
+  companyGrid.innerHTML = '';
+  if (filtered.length === 0) {
+    companyGrid.innerHTML = '<div class="empty">No companies found. Rent the next office!</div>';
+    return;
+  }
+  filtered.forEach(c => {
+    const card = document.createElement('div');
+    card.className = 'company-card';
+    card.innerHTML = `
+      <div class="card-top">
+        <span class="card-name">${esc(c.name)}</span>
+        <span class="card-floor">Floor ${c.floor + 1}</span>
+      </div>
+      <div class="card-brief">${esc(c.brief)}</div>
+      <div class="card-status status-${c.status}">
+        <span class="status-dot"></span> ${c.status === 'active' ? 'Agents active' : 'Idle'}
+      </div>
+    `;
+    card.addEventListener('click', () => { goToFloor(c.floor); showOfficeDetail(c); });
+    companyGrid.appendChild(card);
+  });
+}
+
+// ─── Office detail ────────────────────────────────────────────────────────────
+function showOfficeDetail(company) {
+  selectedCompany = company;
+  const pendingJobs = company.jobs?.filter(j => j.status === 'pending') || [];
+  const doneJobs = company.jobs?.filter(j => j.status === 'done') || [];
+
+  officeDetail.innerHTML = `
+    <h3>${esc(company.name)}</h3>
+    <div class="office-floor">Floor ${company.floor + 1} · ${company.status}</div>
+    <div class="detail-section">
+      <div class="detail-label">About</div>
+      <div class="detail-value">${esc(company.brief)}</div>
+    </div>
+    <div class="detail-section">
+      <div class="detail-label">Agents</div>
+      <div>${(company.agents || []).map(a => `<span class="agent-tag">${esc(a)}</span>`).join('')}</div>
+    </div>
+    ${pendingJobs.length > 0 ? `
+    <div class="detail-section">
+      <div class="detail-label">Pending Jobs (${pendingJobs.length})</div>
+      ${pendingJobs.map(j => `
+        <div class="job-item pending">
+          <div class="job-status">⏳ ${esc(j.title)}</div>
+          <button class="btn btn-approve" onclick="approveJob(${company.id}, '${esc(j.id || j.title)}')">Approve</button>
+          <button class="btn btn-decline" onclick="declineJob(${company.id}, '${esc(j.id || j.title)}')">Decline</button>
+        </div>
+      `).join('')}
+    </div>
+    ` : ''}
+    ${doneJobs.length > 0 ? `
+    <div class="detail-section">
+      <div class="detail-label">Completed Jobs</div>
+      ${doneJobs.slice(-3).map(j => `
+        <div class="job-item done">✓ ${esc(j.title)}</div>
+      `).join('')}
+    </div>
+    ` : ''}
   `;
-
-  // Draw overlay
-  drawDetectionOverlay(result);
-
-  setStatus(analyzeStatus, 'ok');
-  analyzeStatus.dataset.ok = result.score >= 0.85 ? `Score ${result.score.toFixed(3)} — message detected` : 'No significant signal';
-  showToast(result.score >= 0.85 ? 'Message detected!' : 'No message found', result.score >= 0.85 ? 'success' : 'error');
+  companyModal.hidden = false;
 }
 
-function drawDetectionOverlay(result) {
-  if (!result.objects || result.objects.length === 0) return;
+// ─── Job actions ──────────────────────────────────────────────────────────────
+window.approveJob = function(companyId, jobId) {
+  const company = companies.find(c => c.id === companyId);
+  if (!company) return;
+  const job = (company.jobs || []).find(j => (j.id || j.title) === jobId);
+  if (job) job.status = 'done';
+  saveCompanies();
+  showOfficeDetail(company);
+  renderDirectory();
+  toast(`Approved: ${job?.title || jobId}`);
+};
 
-  const img = new Image();
-  img.src = currentImageData.src;
-  img.onload = () => {
-    const canvas = overlayCanvas;
-    const ctx = canvas.getContext('2d');
-    canvas.width = img.naturalWidth;
-    canvas.height = img.naturalHeight;
+window.declineJob = function(companyId, jobId) {
+  const company = companies.find(c => c.id === companyId);
+  if (!company) return;
+  company.jobs = (company.jobs || []).filter(j => (j.id || j.title) !== jobId);
+  saveCompanies();
+  showOfficeDetail(company);
+  renderDirectory();
+  toast('Job declined');
+};
 
-    // Draw original image
-    ctx.drawImage(img, 0, 0);
+// ─── Rent office ──────────────────────────────────────────────────────────────
+async function handleRent() {
+  const nameInput = document.getElementById('company-name');
+  const briefInput = document.getElementById('company-brief');
+  const name = nameInput.value.trim();
+  const brief = briefInput.value.trim();
 
-    // Get ground row position (normalized)
-    const groundY = (result.groundRow / img.naturalHeight) * canvas.height;
-
-    // Draw buildings
-    ctx.strokeStyle = 'rgba(255, 208, 0, 0.7)';
-    ctx.lineWidth = 2;
-    ctx.fillStyle = 'rgba(255, 208, 0, 0.15)';
-
-    for (const obj of result.objects) {
-      const x = (obj.x0 / img.naturalWidth) * canvas.width;
-      const w = ((obj.x1 - obj.x0) / img.naturalWidth) * canvas.width;
-      const h = (obj.height / img.naturalHeight) * canvas.height;
-      const y = groundY - h;
-
-      ctx.fillRect(x, y, w, h);
-      ctx.strokeRect(x, y, w, h);
-
-      // Label with height
-      ctx.fillStyle = 'rgba(255, 208, 0, 0.9)';
-      ctx.font = '10px monospace';
-      ctx.fillText(`h=${obj.height}`, x + 2, y + 12);
-      ctx.fillStyle = 'rgba(255, 208, 0, 0.15)';
-    }
-
-    // Draw ground line
-    ctx.strokeStyle = 'rgba(255, 208, 0, 0.5)';
-    ctx.setLineDash([5, 5]);
-    ctx.beginPath();
-    ctx.moveTo(0, groundY);
-    ctx.lineTo(canvas.width, groundY);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    resultOverlay.classList.remove('hidden');
-  };
-}
-
-async function analyzeWithVision() {
-  if (!apiKey) {
-    setStatus(analyzeStatus, 'err');
-    analyzeStatus.dataset.err = 'Please connect with Pollen first';
-    showToast('Connect with Pollen to use AI vision', 'error');
+  if (!name || !brief) {
+    rentStatus.textContent = 'Please fill in both fields.';
+    rentStatus.className = 'rent-status error';
     return;
   }
 
-  // Prepare the prompt
-  const prompt = `Analyze this image for hidden steganographic messages. Specifically, look for:
-- Building heights that encode letters (A=1..Z=26)
-- Any patterns in structural elements that might carry encoded information
-- Report what you find or confirm nothing is hidden.
-
-Return ONLY the hidden message if found, or "NO MESSAGE FOUND" if nothing is detected.`;
+  rentStatus.textContent = 'Creating your company...';
+  rentStatus.className = 'rent-status loading';
+  rentBtn.disabled = true;
 
   try {
-    // Upload image to Pollinations
-    const base64Img = currentImageData.src.split(',')[1];
-    const resp = await fetch('https://gen.pollinations.ai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: 'anthropic/claude-fable-5.1',
-        messages: [
-          {
-            role: 'user',
-            content: [
-              { type: 'text', text: prompt },
-              { type: 'image_url', image_url: { url: currentImageData.src } }
-            ]
-          }
-        ],
-        max_tokens: 500,
-        temperature: 0.1
-      })
-    });
-
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({}));
-      throw new Error(err.error?.message || `HTTP ${resp.status}`);
+    // Use Pollinations API to generate company agents
+    let agents = ['Worker', 'Manager'];
+    if (pollenKey) {
+      agents = await generateAgents(name, brief);
     }
 
-    const data = await resp.json();
-    const message = data.choices?.[0]?.message?.content || '(no response)';
+    const colorChoices = [0x34d399, 0x60a5fa, 0xf472b6, 0xfbbf24, 0xa78bfa, 0xfb923c, 0x22d3ee];
+    const newCompany = {
+      id: Date.now(),
+      name,
+      brief,
+      status: 'active',
+      color: colorChoices[Math.floor(Math.random() * colorChoices.length)],
+      agents,
+      floor: companies.length,
+      jobs: [
+        { id: `job-${Date.now()}`, title: 'Initial research task', status: 'pending' }
+      ]
+    };
 
-    // Update UI
-    resultStats.classList.remove('hidden');
-    visionBox.classList.remove('hidden');
-    visionText.textContent = message;
-    decodedBox.classList.add('hidden');
+    companies.push(newCompany);
+    saveCompanies();
+    createTower();
+    buildFloorDots();
+    goToFloor(companies.length - 1);
+    renderDirectory();
 
-    // Try to extract a code-like message
-    const codeMatch = message.match(/\b[A-Z0-9\s]{3,}\b/);
-    if (codeMatch) {
-      detectionResult.textContent = '~ AI Found Possible Message';
-      detectionResult.className = 'result-badge warn';
-      decodedBox.classList.remove('hidden');
-      decodedText.textContent = codeMatch[0].trim();
-    } else {
-      detectionResult.textContent = '~ AI Vision Response';
-      detectionResult.className = 'result-badge warn';
-    }
-
-    detailDetails.classList.add('hidden');
-    setStatus(analyzeStatus, 'ok');
-    analyzeStatus.dataset.ok = 'AI vision analysis complete';
-    showToast('Analysis complete', 'success');
+    nameInput.value = '';
+    briefInput.value = '';
+    rentStatus.textContent = 'Office rented! Welcome to the tower.';
+    rentStatus.className = 'rent-status success';
+    toast(`Welcome ${name} to Floor ${newCompany.floor + 1}!`);
   } catch (err) {
-    setStatus(analyzeStatus, 'err');
-    analyzeStatus.dataset.err = err.message;
-    showToast('Vision analysis failed', 'error');
+    rentStatus.textContent = `Failed: ${err.message}`;
+    rentStatus.className = 'rent-status error';
+  } finally {
+    rentBtn.disabled = false;
   }
 }
 
-// ─── Benchmark Table ─────────────────────────────────────────────────────────
+async function generateAgents(name, brief) {
+  const prompt = `You are creating AI agents for a new company called "${name}". The company does: "${brief}".
+Return exactly 2-3 agent names in a JSON array format like: ["AgentName1", "AgentName2"].
+Only output the JSON array, nothing else.`;
 
-// Recovery rates measured by tests/roundtrip.mjs across 21 secrets
-// (18/21 recovered at sim>=0.9, uniform across all distortion types).
-// The 3 failures are single-character secrets (X, ABC) — too few buildings
-// to fit a lattice. All control images score 0 (zero false positives).
-const BENCHMARK = [
-  { distortion: 'PNG 1×',     png1: 86, png75: 86, png50: 86, jpeg82: 86, jpeg55: 86, jpegResize: 86, blur: 86 },
-  { distortion: 'PNG 75%',    png1: 86, png75: 86, png50: 86, jpeg82: 86, jpeg55: 86, jpegResize: 86, blur: 86 },
-  { distortion: 'PNG 50%',    png1: 86, png75: 86, png50: 86, jpeg82: 86, jpeg55: 86, jpegResize: 86, blur: 86 },
-  { distortion: 'JPEG 82%',   png1: 86, png75: 86, png50: 86, jpeg82: 86, jpeg55: 86, jpegResize: 86, blur: 86 },
-  { distortion: 'JPEG 55%',   png1: 86, png75: 86, png50: 86, jpeg82: 86, jpeg55: 86, jpegResize: 86, blur: 86 },
-  { distortion: 'JPEG 55% + resize', png1: 86, png75: 86, png50: 86, jpeg82: 86, jpeg55: 86, jpegResize: 86, blur: 86 },
-  { distortion: 'Blur 0.6',   png1: 86, png75: 86, png50: 86, jpeg82: 86, jpeg55: 86, jpegResize: 86, blur: 86 },
-];
+  const res = await fetch(`${POLLEN_API}/openai/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${pollenKey}` },
+    body: JSON.stringify({ model: 'anthropic/claude-haiku-3.5', messages: [{ role: 'user', content: prompt }], max_tokens: 100 })
+  });
 
-function renderBenchmark() {
-  const body = $('benchmark-body');
-  if (!body) return;
-  body.innerHTML = BENCHMARK.map(r => `
-    <tr>
-      <td>${r.distortion}</td>
-      <td class="pass-cell">${r.png1}%</td>
-      <td class="pass-cell">${r.png75}%</td>
-      <td class="pass-cell">${r.png50}%</td>
-      <td class="pass-cell">${r.jpeg82}%</td>
-      <td class="pass-cell">${r.jpeg55}%</td>
-      <td class="pass-cell">${r.jpegResize}%</td>
-      <td class="pass-cell">${r.blur}%</td>
-    </tr>
-  `).join('');
+  if (!res.ok) throw new Error(`API ${res.status}`);
+  const data = await res.json();
+  const text = data?.choices?.[0]?.text?.trim() || '';
+  try {
+    return JSON.parse(text);
+  } catch {
+    // Fallback parsed names
+    return text.split(',').map(s => s.trim()).filter(Boolean).slice(0, 3) || ['Worker', 'Manager'];
+  }
 }
 
-// ─── Boot ────────────────────────────────────────────────────────────────────
+// ─── Toast ────────────────────────────────────────────────────────────────────
+function toast(msg, type = 'success') {
+  const t = document.createElement('div');
+  t.className = `toast ${type}`;
+  t.textContent = msg;
+  toastContainer.appendChild(t);
+  setTimeout(() => t.remove(), 3000);
+}
 
-document.addEventListener('DOMContentLoaded', () => {
-  init();
-  renderBenchmark();
-});
+// ─── Escape HTML ──────────────────────────────────────────────────────────────
+function esc(str) {
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// ─── Tick agents (simulate work) ─────────────────────────────────────────────
+function tickAgents() {
+  let changed = false;
+  companies.forEach(c => {
+    if (c.status !== 'active') return;
+    (c.jobs || []).forEach(j => {
+      if (j.status === 'pending' && Math.random() < 0.03) {
+        j.status = 'done';
+        changed = true;
+        // Add a new pending job after completing
+        if (Math.random() < 0.5) {
+          c.jobs.push({
+            id: `job-${Date.now()}-${Math.random()}`,
+            title: randomTask(),
+            status: 'pending'
+          });
+        }
+      }
+    });
+  });
+  if (changed) {
+    saveCompanies();
+    buildFloorDots();
+    renderDirectory();
+    if (selectedCompany) showOfficeDetail(selectedCompany);
+  }
+}
+
+function randomTask() {
+  const tasks = [
+    'Analyze competitor landscape',
+    'Generate marketing copy',
+    'Write documentation',
+    'Process customer feedback',
+    'Optimize codebase',
+    'Create design mockup',
+    'Research market trends',
+    'Draft investor pitch',
+    'Build API endpoint',
+    'Review pull requests',
+  ];
+  return tasks[Math.floor(Math.random() * tasks.length)];
+}
+
+setInterval(tickAgents, 5000);
+
+// ─── Start ────────────────────────────────────────────────────────────────────
+init();
+renderDirectory();
+goToFloor(0);
