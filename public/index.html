@@ -8,9 +8,8 @@
 </head>
 <body>
 <div id="app">
-  <canvas id="tower-canvas"></canvas>
+  <canvas id="tower-canvas" aria-hidden="true"></canvas>
 
-  <!-- Header -->
   <header id="topbar">
     <div class="brand">
       <div class="logo">Tower</div>
@@ -23,21 +22,18 @@
     </div>
   </header>
 
-  <!-- Floor navigation -->
   <nav id="floor-nav" aria-label="Floor navigation">
-    <button id="prev-floor" class="nav-btn" title="Previous floor (↑)">▲</button>
+    <button id="prev-floor" class="nav-btn" aria-label="Previous floor" disabled>▲</button>
     <div id="floor-dots" class="floor-dots"></div>
-    <button id="next-floor" class="nav-btn" title="Next floor (↓)">▼</button>
+    <button id="next-floor" class="nav-btn" aria-label="Next floor">▼</button>
   </nav>
 
-  <!-- Instructions -->
-  <div class="instructions">
+  <div class="instructions" id="instructions">
     <span><kbd>↑</kbd><kbd>↓</kbd> Navigate floors</span>
     <span><kbd>R</kbd> Auto-rotate</span>
     <span>Click a floor to inspect</span>
   </div>
 
-  <!-- Company directory -->
   <section id="directory" class="panel" aria-label="Company directory">
     <div class="panel-head">
       <h2>🏢 Company Directory</h2>
@@ -53,7 +49,6 @@
     <div id="company-grid" class="company-grid"></div>
   </section>
 
-  <!-- Rent next office -->
   <section id="rent-panel" class="panel rent-panel" aria-label="Rent an office">
     <div class="panel-head">
       <h2>🆕 Rent the Next Office</h2>
@@ -65,20 +60,18 @@
         <textarea id="company-brief" placeholder="What does this company do?" maxlength="200" rows="2" autocomplete="off"></textarea>
         <button id="rent-btn" class="btn btn-pollen" style="width:100%">Rent Office →</button>
       </div>
-      <div id="rent-status" class="rent-status"></div>
+      <div id="rent-status" class="rent-status" aria-live="polite"></div>
     </div>
   </section>
 
-  <!-- Office detail modal -->
-  <div id="office-modal" class="modal" hidden role="dialog" aria-modal="true" aria-label="Company details">
-    <div class="modal-backdrop" data-close></div>
+  <div id="office-modal" class="modal" role="dialog" aria-modal="true" aria-label="Company details" hidden>
+    <div class="modal-backdrop" id="modal-backdrop"></div>
     <div class="modal-card">
-      <button class="modal-close" data-close aria-label="Close">✕</button>
+      <button class="modal-close" id="modal-close" aria-label="Close">✕</button>
       <div id="office-detail"></div>
     </div>
   </div>
 
-  <!-- Toast -->
   <div id="toast-container" class="toast-container" aria-live="polite"></div>
 </div>
 
@@ -91,6 +84,5 @@
 }
 </script>
 <script type="module" src="app.js"></script>
-<script type="module" src="https://cdn.jsdelivr.net/npm/@pollinations/ui@0.1.0-alpha.20/dist/connect.js"></script>
 </body>
 </html>
