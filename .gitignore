@@ -1,0 +1,4 @@
+node_modules/
+sharp-dist/
+*.log
+.DS_Store

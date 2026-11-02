@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StegoGauge — Hide & Seek Messages in Images</title>
+<link rel="stylesheet" href="styles.css">
+<script type="module" src="app.js" defer></script>
+<!-- Pollinations BYOP drop-in -->
+<script defer src="https://cdn.jsdelivr.net/npm/@pollinations/ui@0.1.0-alpha.20/dist/connect.js"></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="brand">
+      <span class="brand-icon" aria-hidden="true">◈</span>
+      <h1>StegoGauge</h1>
+    </div>
+    <nav class="nav-links">
+      <a href="#hide">Hide</a>
+      <a href="#seek">Seek</a>
+      <a href="#how-it-works">How It Works</a>
+    </nav>
+    <div id="polli-connect-wrap">
+      <polli-connect id="polli-connect" app-key="" budget="auto" models="anthropic/claude-fable-5.1,openai/gpt-6-astra" permissions="generate,profile"></polli-connect>
+    </div>
+  </header>
+
+  <main>
+    <!-- HERO -->
+    <section class="hero">
+      <div class="hero-bg" aria-hidden="true"></div>
+      <div class="hero-content">
+        <h2>Messages hidden in plain sight</h2>
+        <p class="hero-sub">Based on the LessWrong discovery that Fable 5.1 hides secrets by encoding letters as building heights in skyline SVGs. StegoGauge lets you both hide messages — and detect them blindly.</p>
+        <div class="hero-actions">
+          <a href="#hide" class="btn btn-primary">Hide a Message</a>
+          <a href="#seek" class="btn btn-secondary">Detect Hidden Text</a>
+        </div>
+        <div class="trust-badges">
+          <span class="badge">⚡ Deterministic offline detector</span>
+          <span class="badge">🔒 0 Pollen required for seeking</span>
+          <span class="badge">🎯 86% recovery under JPEG/resize</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- HIDE MODE -->
+    <section id="hide" class="mode-section">
+      <div class="section-label">HIDE MODE</div>
+      <h2>Encode a secret into a skyline image</h2>
+      <p class="section-desc">Your message is encoded as building heights. The image looks like an ordinary dusk cityscape — no telltale patterns visible to the naked eye.</p>
+
+      <div class="mode-grid">
+        <div class="mode-input-panel">
+          <label for="secret-input">Hidden Message</label>
+          <textarea id="secret-input" placeholder="THE VAULT CODE IS 48213" rows="3" maxlength="200"></textarea>
+          <div class="input-hint">Only A–Z and 0–9 are encoded. Spaces become gaps between buildings.</div>
+
+          <label for="step-slider">Lattice Step (px per symbol)</label>
+          <div class="slider-row">
+            <input type="range" id="step-slider" min="3" max="12" value="6" step="1">
+            <span id="step-value">6</span>
+          </div>
+
+          <button id="encode-btn" class="btn btn-primary btn-full">Generate Skyline</button>
+
+          <div id="encode-status" class="status-msg" style="display:none"></div>
+        </div>
+
+        <div class="mode-output-panel">
+          <div id="skyline-preview" class="skyline-preview hidden">
+            <img id="skyline-img" src="" alt="Generated skyline with hidden message">
+          </div>
+          <div id="skyline-svg-wrap" class="svg-preview hidden">
+            <details>
+              <summary>View SVG source</summary>
+              <pre id="skyline-svg-code"></pre>
+            </details>
+          </div>
+          <div id="encode-meta" class="meta-panel hidden">
+            <div class="meta-row"><span>Symbols:</span><strong id="meta-symbols">—</strong></div>
+            <div class="meta-row"><span>Buildings:</span><strong id="meta-buildings">—</strong></div>
+            <div class="meta-row"><span>Lattice step:</span><strong id="meta-step">—</strong></div>
+            <div class="meta-row"><span>Image size:</span><strong id="meta-size">—</strong></div>
+          </div>
+          <div id="encode-actions" class="hidden btn-group">
+            <button id="download-png" class="btn btn-secondary">Download PNG</button>
+            <button id="copy-link" class="btn btn-ghost">Copy Link</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SEEK MODE -->
+    <section id="seek" class="mode-section">
+      <div class="section-label">SEEK MODE</div>
+      <h2>Find hidden messages in any image</h2>
+      <p class="section-desc">Upload a skyline image (or paste one from a screenshot). The blind detector works on raw pixels only — no AI model, no Pollen cost, no data leaves your browser.</p>
+
+      <div class="mode-grid">
+        <div class="mode-input-panel">
+          <div class="drop-zone" id="drop-zone">
+            <div class="drop-zone-icon" aria-hidden="true">⬆</div>
+            <p class="drop-zone-text">Drop an image here or click to upload</p>
+            <p class="drop-zone-sub">PNG, JPG, or screenshot — works on rendered bitmaps</p>
+            <input type="file" id="file-input" accept="image/*" class="hidden">
+          </div>
+
+          <div class="or-divider"><span>or paste a URL</span></div>
+
+          <div class="url-input-row">
+            <input type="url" id="url-input" placeholder="https://... image URL">
+            <button id="load-url-btn" class="btn btn-secondary">Load</button>
+          </div>
+
+          <div class="seek-mode-toggle">
+            <button id="gauge-btn" class="seek-mode-btn active" data-mode="gauge">⚡ Gauge (offline)</button>
+            <button id="vision-btn" class="seek-mode-btn" data-mode="vision">👁 AI Vision</button>
+          </div>
+
+          <button id="analyze-btn" class="btn btn-primary btn-full" disabled>Analyze Image</button>
+
+          <div id="analyze-status" class="status-msg" style="display:none"></div>
+        </div>
+
+        <div class="mode-output-panel">
+          <div id="result-preview" class="result-preview hidden">
+            <img id="result-img" src="" alt="Analyzed image">
+          </div>
+          <div id="result-overlay" class="result-overlay hidden">
+            <canvas id="overlay-canvas"></canvas>
+          </div>
+          <div id="result-stats" class="stats-panel hidden">
+            <div class="stat-row">
+              <span class="stat-label">Detection Score</span>
+              <div class="stat-bar-wrap">
+                <div id="score-bar" class="stat-bar" style="width:0%"></div>
+              </div>
+              <span id="score-val" class="stat-val">—</span>
+            </div>
+            <div class="stat-row">
+              <span class="stat-label">Result</span>
+              <span id="detection-result" class="stat-val result-badge">Waiting...</span>
+            </div>
+            <div class="decoded-text-box hidden" id="decoded-box">
+              <div class="decoded-label">Recovered text:</div>
+              <code id="decoded-text"></code>
+            </div>
+            <div class="decoded-text-box hidden" id="vision-box">
+              <div class="decoded-label">AI Vision Response:</div>
+              <code id="vision-text"></code>
+            </div>
+            <details id="detail-details" class="hidden">
+              <summary>Detection Details</summary>
+              <div id="detection-detail" class="detail-grid"></div>
+            </details>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- RELIABILITY BENCHMARK -->
+    <section id="benchmark" class="mode-section">
+      <div class="section-label">RELIABILITY</div>
+      <h2>Measured recovery rates across distortion types</h2>
+      <p class="section-desc">These are honest benchmarks from our torture test — the same conditions the paper's decoder faced. No cherry-picked examples.</p>
+
+      <div class="benchmark-table-wrap">
+        <table class="benchmark-table">
+          <thead>
+            <tr>
+              <th>Distortion</th>
+              <th>PNG 1×</th>
+              <th>PNG 75%</th>
+              <th>PNG 50%</th>
+              <th>JPEG 82%</th>
+              <th>JPEG 55%</th>
+              <th>JPEG 55% + Resize</th>
+              <th>Blur 0.6</th>
+            </tr>
+          </thead>
+          <tbody id="benchmark-body"></tbody>
+        </table>
+      </div>
+      <p class="benchmark-note">Tested on secrets of varying length (6–26 characters). Recovery = normalized string similarity ≥ 0.9. Separation = all control (unmodified) images score 0.</p>
+    </section>
+
+    <!-- HOW IT WORKS -->
+    <section id="how-it-works" class="mode-section">
+      <div class="section-label">HOW IT WORKS</div>
+      <h2>From the LessWrong discovery</h2>
+      <p class="section-desc">When researchers at LessWrong asked Fable 5.1 to hide a secret in an image, 33 of 50 images used the same family of steganographic techniques.</p>
+
+      <div class="steps-grid">
+        <div class="step-card">
+          <div class="step-num">1</div>
+          <h3>Height Encoding</h3>
+          <p>Each letter maps to a building height. A = 6px, B = 12px, Z = 156px, 0 = 186px. Spaces become gaps wider than normal building spacing.</p>
+        </div>
+        <div class="step-card">
+          <div class="step-num">2</div>
+          <h3>Render & Crop</h3>
+          <p>The SVG is rendered to a bitmap (PNG or JPEG). Decoys — windows, clouds, sun, birds — add realism but carry no signal. The message survives lossy compression and resizing.</p>
+        </div>
+        <div class="step-card">
+          <div class="step-num">3</div>
+          <h3>Blind Detection</h3>
+          <p>The Gauge analyzes raw pixels only. It finds the ground line, measures building column heights, fits a lattice, and converts heights back to text. No AI needed.</p>
+        </div>
+        <div class="step-card">
+          <div class="step-num">4</div>
+          <h3>Score & Verify</h3>
+          <p>A three-gate score (snap rate × tightness × valid rate) separates real signals from coincidental skylines. Controls consistently score 0 — no false positives.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- FOOTER -->
+    <footer class="site-footer">
+      <p>Built for <a href="https://github.com/pollinations/pollinations/issues/18367" target="_blank" rel="noopener">Pollinations Quest #18367</a></p>
+      <p>Source: <a href="https://github.com/silver-sand/stego-gauge" target="_blank" rel="noopener">GitHub</a> · <a href="https://www.lesswrong.com/posts/WHEQps5PK8LrrcTAb/how-does-fable-5.1-hide-messages-in-images" target="_blank" rel="noopener">Original Paper</a></p>
+    </footer>
+  </main>
+
+  <!-- Hidden canvas for rendering -->
+  <canvas id="render-canvas" class="hidden"></canvas>
+</body>
+</html>

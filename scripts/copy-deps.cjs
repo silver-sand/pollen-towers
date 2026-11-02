@@ -1,22 +1,13 @@
-// Copy node_modules/sharp/dist into the public tree so the browser can use it.
-// The engine only imports from ./engine/*.js; this script is for dev convenience.
+// Copy engine/*.js into public/engine/ so the browser can import them.
+// The browser app never needs sharp — that's a Node-only dev dependency.
 const fs = require('fs');
 const path = require('path');
-const src = path.join(__dirname, '..', 'node_modules', 'sharp');
-const dst = path.join(__dirname, '..', 'public', 'sharp-dist');
-if (!fs.existsSync(path.join(__dirname, '..', 'public'))) {
-  fs.mkdirSync(path.join(__dirname, '..', 'public'), { recursive: true });
-}
-if (!fs.existsSync(dst)) {
-  fs.mkdirSync(dst, { recursive: true });
-  cp(src, dst);
-  console.log('copied sharp/dist → public/sharp-dist');
-}
-function cp(s, d) {
-  for (const ent of fs.readdirSync(s, { withFileTypes: true })) {
-    const srcP = path.join(s, ent.name);
-    const dstP = path.join(d, ent.name);
-    if (ent.isDirectory()) { cp(srcP, dstP); }
-    else { fs.copyFileSync(srcP, dstP); }
+const src = path.join(__dirname, '..', 'engine');
+const dst = path.join(__dirname, '..', 'public', 'engine');
+fs.mkdirSync(dst, { recursive: true });
+for (const ent of fs.readdirSync(src, { withFileTypes: true })) {
+  if (ent.isFile() && ent.name.endsWith('.js')) {
+    fs.copyFileSync(path.join(src, ent.name), path.join(dst, ent.name));
+    console.log('copied', ent.name);
   }
 }
