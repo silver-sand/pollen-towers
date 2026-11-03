@@ -4,17 +4,18 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { clearSession, completeSignIn, generateCompanyPlan, getSession, runCompany, startSignIn } from './pollen.js';
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 const FLOOR_HEIGHT = 2.5;
 const TOTAL_FLOORS  = 12;
-const POLLEN_API    = 'https://api.pollinations.ai';
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let currentFloor     = 0;
 let autoRotate       = false;
-let pollenKey        = '';
 let companies        = [];
+let renting           = false;
+let runningCompanies  = new Set();
 let selectedCompany  = null;
 let raycaster, mouse;
 let hoveredFloor     = null;
@@ -457,6 +458,7 @@ function openModal()  { companyModal.hidden = false; appEl.classList.add('modal-
 function closeModal() { companyModal.hidden = true;  appEl.classList.remove('modal-open'); directories.forEach(d => d.classList.remove('dimmed')); selectedCompany = null; }
 
 function showOfficeDetail(company) {
+  selectedCompany = company;
   const pending = (company.jobs || []).filter(j => j.status === 'pending');
   const done    = (company.jobs || []).filter(j => j.status === 'done');
   officeDetail.innerHTML = `
@@ -464,27 +466,28 @@ function showOfficeDetail(company) {
     <div class="office-floor">Floor ${company.floor + 1} · ${company.status}</div>
     <div class="detail-section"><div class="detail-label">About</div><div class="detail-value">${esc(company.brief)}</div></div>
     <div class="detail-section"><div class="detail-label">Agents</div><div>${(company.agents||[]).map(a=>`<span class="agent-tag">${esc(a)}</span>`).join('')}</div></div>
+    ${getSession() ? `<div class="detail-section"><button class="btn btn-pollen" data-action="run-company" data-company="${esc(String(company.id))}" ${runningCompanies.has(company.id) ? 'disabled' : ''}>${runningCompanies.has(company.id) ? 'Agents working…' : 'Run today with Pollen'}</button></div>` : ''}
     ${pending.length ? `<div class="detail-section"><div class="detail-label">Pending Jobs (${pending.length})</div>${
-      pending.map(j => `<div class="job-item pending"><div class="job-status">⏳ ${esc(j.title)}</div><div class="job-actions">
-        <button class="btn btn-approve" data-action="approve" data-company="${company.id}" data-id="${esc(String(j.id||j.title))}">Approve</button>
-        <button class="btn btn-decline"  data-action="decline"  data-company="${company.id}" data-id="${esc(String(j.id||j.title))}">Decline</button></div></div>`).join('')}
+      pending.map(j => `<div class="job-item pending"><div class="job-status">⏳ ${esc(j.title)}</div>${j.result ? `<div>${esc(j.result)}</div>` : ''}<div class="job-actions">
+        <button class="btn btn-approve" data-action="approve" data-company="${esc(String(company.id))}" data-id="${esc(String(j.id||j.title))}">Approve</button>
+        <button class="btn btn-decline"  data-action="decline"  data-company="${esc(String(company.id))}" data-id="${esc(String(j.id||j.title))}">Decline</button></div></div>`).join('')}
     </div>` : ''}
     ${done.length ? `<div class="detail-section"><div class="detail-label">Completed</div>${
-      done.slice(-3).map(j => `<div class="job-item done">✓ ${esc(j.title)}</div>`).join('')}</div>` : ''}
+      done.slice(-3).map(j => `<div class="job-item done">✓ ${esc(j.title)}${j.result ? `<div>${esc(j.result)}</div>` : ''}</div>`).join('')}</div>` : ''}
   `;
   openModal();
 }
 
 // ─── Job actions ──────────────────────────────────────────────────────────────
 function approveJob(companyId, jobId) {
-  const c = companies.find(x => x.id === companyId);
+  const c = companies.find(x => String(x.id) === String(companyId));
   if (!c) return;
   const j = (c.jobs || []).find(x => (x.id || x.title) === jobId);
   if (j) j.status = 'done';
   saveCompanies(); showOfficeDetail(c); renderDirectory(); toast(`Approved: ${j?.title || jobId}`);
 }
 function declineJob(companyId, jobId) {
-  const c = companies.find(x => x.id === companyId);
+  const c = companies.find(x => String(x.id) === String(companyId));
   if (!c) return;
   c.jobs = (c.jobs || []).filter(j => (j.id || j.title) !== jobId);
   saveCompanies(); showOfficeDetail(c); renderDirectory(); toast('Job declined');
@@ -492,31 +495,41 @@ function declineJob(companyId, jobId) {
 
 // ─── Events ───────────────────────────────────────────────────────────────────
 function setupEvents() {
+  // Remove the legacy manually pasted key; OAuth credentials are tab-scoped only.
+  try { localStorage.removeItem('pollen-towers-pollen-key'); } catch {}
   prevBtn.addEventListener('click', () => goToFloor(currentFloor - 1));
   nextBtn.addEventListener('click', () => goToFloor(currentFloor + 1));
   rotateBtn.addEventListener('click', toggleAutoRotate);
 
-  // BYOP connect
+  // Pollinations OAuth returns the short-lived user key in the fragment.
   connectBtn.addEventListener('click', async () => {
-    if (pollenKey) {
-      pollenKey = '';
-      try { localStorage.removeItem('pollen-towers-pollen-key'); } catch(e) {}
+    if (getSession()) {
+      clearSession();
       connectBtn.textContent = 'Connect Pollen';
-      toast('Pollen disconnected'); return;
+      renderDirectory();
+      if (selectedCompany) showOfficeDetail(selectedCompany);
+      toast('Pollen disconnected');
+      return;
     }
-    const key = prompt('Enter your Pollen API key (get one at enter.pollinations.ai/keys):');
-    if (key) {
-      pollenKey = key.trim();
-      try { localStorage.setItem('pollen-towers-pollen-key', pollenKey); } catch(e) {}
-      connectBtn.textContent = '✓ Connected';
-      toast('Pollen connected!');
+    connectBtn.disabled = true;
+    try {
+      await startSignIn();
+    } catch (error) {
+      rentStatus.textContent = `Could not start sign-in: ${error.message}`;
+      rentStatus.className = 'rent-status error';
+    } finally {
+      connectBtn.disabled = false;
     }
   });
 
-  try {
-    const saved = localStorage.getItem('pollen-towers-pollen-key');
-    if (saved) { pollenKey = saved; connectBtn.textContent = '✓ Connected'; }
-  } catch(e) {}
+  completeSignIn().then(authResult => {
+    if (authResult === 'ok') toast('Pollen connected for this tab.');
+    else if (authResult) toast(`Pollen sign-in ${authResult.replaceAll('-', ' ')}.`, 'error');
+    if (getSession()) connectBtn.textContent = '✓ Connected';
+  }).catch(error => {
+    console.error('Pollinations sign-in failed:', error);
+    toast('Pollinations sign-in failed. Please try again.', 'error');
+  });
 
   // Canvas click → select floor (only when modal is CLOSED)
   canvas.addEventListener('click', e => {
@@ -563,7 +576,7 @@ function setupEvents() {
   officeDetail.addEventListener('click', e => {
     const btn = e.target.closest('[data-action]');
     if (!btn) return;
-    const companyId = parseInt(btn.dataset.companyId || btn.getAttribute('data-company') || selectedCompany?.id);
+    const companyId = btn.dataset.company || selectedCompany?.id;
     const jobId     = btn.dataset.id;
     if (btn.dataset.action === 'approve') approveJob(companyId, jobId);
     else if (btn.dataset.action === 'decline') declineJob(companyId, jobId);
@@ -593,6 +606,12 @@ function setupEvents() {
   });
 
   rentBtn.addEventListener('click', handleRent);
+  officeDetail.addEventListener('click', async e => {
+    const button = e.target.closest('[data-action="run-company"]');
+    if (!button) return;
+    const company = companies.find(item => String(item.id) === button.dataset.company);
+    if (company) await handleRunCompany(company);
+  });
   document.getElementById('company-name').addEventListener('keydown', e => { if (e.key === 'Enter') handleRent(); });
   document.getElementById('company-brief').addEventListener('keydown', e => { if (e.key === 'Enter' && e.ctrlKey) handleRent(); });
 }
@@ -649,25 +668,36 @@ function renderDirectory() {
 
 // ─── Rent office ──────────────────────────────────────────────────────────────
 async function handleRent() {
+  if (renting) return;
   const nameInput = document.getElementById('company-name');
   const briefInput = document.getElementById('company-brief');
   const name = nameInput.value.trim();
   const brief = briefInput.value.trim();
   if (!name || !brief) { rentStatus.textContent = 'Please fill in both fields.'; rentStatus.className = 'rent-status error'; return; }
-  rentStatus.textContent = 'Creating your company…'; rentStatus.className = 'rent-status loading'; rentBtn.disabled = true;
+  if (name.length < 2 || brief.length < 10) { rentStatus.textContent = 'Use a company name of 2+ characters and a brief of at least 10.'; rentStatus.className = 'rent-status error'; return; }
+  if (!getSession()) {
+    rentStatus.textContent = 'Sign in with Pollinations first. Your company form is still here.';
+    rentStatus.className = 'rent-status error';
+    connectBtn.focus();
+    return;
+  }
+  if (companies.length >= TOTAL_FLOORS) { rentStatus.textContent = 'The tower is full.'; rentStatus.className = 'rent-status error'; return; }
+
+  renting = true;
+  rentStatus.textContent = 'Using your Pollen to build a team…';
+  rentStatus.className = 'rent-status loading';
+  rentBtn.disabled = true;
   try {
-    let agents = ['Worker', 'Manager'];
-    if (pollenKey) {
-      try { agents = await generateAgents(name, brief); } catch(e) { agents = ['Worker', 'Manager']; }
-    }
+    const plan = await generateCompanyPlan(name, brief);
     const colors = [0x34d399, 0x60a5fa, 0xf472b6, 0xfbbf24, 0xa78bfa, 0xfb923c, 0x22d3ee];
+    const companyId = `company-${Date.now()}`;
     const newCompany = {
-      id: Date.now(), name, brief,
+      id: companyId, name, brief, model: null,
       status: 'active',
       color: colors[Math.floor(Math.random() * colors.length)],
-      agents,
+      agents: plan.agents,
       floor: companies.length,
-      jobs: [{ id: `job-${Date.now()}`, title: 'Initial research task', status: 'pending' }]
+      jobs: plan.jobs,
     };
     companies.push(newCompany);
     saveCompanies();
@@ -676,27 +706,36 @@ async function handleRent() {
     goToFloor(companies.length - 1);
     renderDirectory();
     nameInput.value = ''; briefInput.value = '';
-    rentStatus.textContent = 'Office rented! Welcome to the tower.';
+    rentStatus.textContent = 'Team created. Run your company from its office to generate real work.';
     rentStatus.className = 'rent-status success';
     toast(`Welcome ${name} to Floor ${newCompany.floor + 1}!`);
-  } catch(err) {
-    rentStatus.textContent = `Failed: ${err.message}`;
+  } catch (error) {
+    rentStatus.textContent = `Failed: ${error.message}`;
     rentStatus.className = 'rent-status error';
-  } finally { rentBtn.disabled = false; }
+  } finally {
+    renting = false;
+    rentBtn.disabled = false;
+  }
 }
 
-async function generateAgents(name, brief) {
-  const prompt = `You are creating AI agents for a new company called "${name}". The company does: "${brief}".
-Return exactly 2-3 agent names in a JSON array like: ["AgentName1", "AgentName2"]. Only output the JSON array.`;
-  const res = await fetch(`${POLLEN_API}/openai/completions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${pollenKey}` },
-    body: JSON.stringify({ model: 'anthropic/claude-haiku-3.5', messages: [{ role: 'user', content: prompt }], max_tokens: 100 })
-  });
-  if (!res.ok) throw new Error(`API ${res.status}`);
-  const data = await res.json();
-  const text = data?.choices?.[0]?.message?.content?.trim() || data?.choices?.[0]?.text?.trim() || '[]';
-  try { return JSON.parse(text); } catch { return text.split(',').map(s=>s.trim()).filter(Boolean).slice(0,3); }
+async function handleRunCompany(company) {
+  if (runningCompanies.has(company.id)) return;
+  runningCompanies = new Set(runningCompanies).add(company.id);
+  showOfficeDetail(company);
+  try {
+    const jobs = await runCompany(company);
+    company.jobs = [...(company.jobs || []), ...jobs];
+    saveCompanies();
+    renderDirectory();
+    toast(`${company.name} finished ${jobs.length} ${jobs.length === 1 ? 'job' : 'jobs'}.`);
+  } catch (error) {
+    rentStatus.textContent = `Could not run ${company.name}: ${error.message}`;
+    rentStatus.className = 'rent-status error';
+  } finally {
+    runningCompanies = new Set(runningCompanies);
+    runningCompanies.delete(company.id);
+    if (selectedCompany?.id === company.id) showOfficeDetail(company);
+  }
 }
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
@@ -712,29 +751,7 @@ function esc(str) {
   return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// ─── Tick agents ──────────────────────────────────────────────────────────────
-function tickAgents() {
-  let changed = false;
-  companies.forEach(c => {
-    if (c.status !== 'active') return;
-    (c.jobs || []).forEach(j => {
-      if (j.status === 'pending' && Math.random() < 0.03) {
-        j.status = 'done'; changed = true;
-        if (Math.random() < 0.5) {
-          c.jobs.push({ id: `job-${Date.now()}-${Math.random()}`, title: randomTask(), status: 'pending' });
-        }
-      }
-    });
-  });
-  if (changed) { saveCompanies(); buildFloorDots(); renderDirectory(); if (selectedCompany) showOfficeDetail(selectedCompany); }
-}
-function randomTask() {
-  return ['Analyze competitor landscape','Generate marketing copy','Write documentation',
-          'Process customer feedback','Optimize codebase','Create design mockup',
-          'Research market trends','Draft investor pitch','Build API endpoint','Review PRs'
-         ][Math.floor(Math.random() * 10)];
-}
-setInterval(tickAgents, 5000);
+// Pollinations work runs only when the owner explicitly starts it; no fake background jobs.
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 try {
