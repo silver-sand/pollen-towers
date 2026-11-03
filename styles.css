@@ -135,15 +135,20 @@ html, body {
 .floor-dots {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  padding: 4px 0;
-  max-height: 40vh;
+  gap: 6px;
+  padding: 8px 4px;
+  max-height: min(60vh, 520px);
   overflow-y: auto;
-  scrollbar-width: none;
-  flex: 1;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent) transparent;
+  flex: 0 1 auto;
   min-height: 0;
+  max-height: 60vh;
 }
-.floor-dots::-webkit-scrollbar { display: none; }
+.floor-dots::-webkit-scrollbar { width: 4px; }
+.floor-dots::-webkit-scrollbar-thumb { background: var(--accent); border-radius: 4px; }
 
 .dot {
   width: 8px;
@@ -423,6 +428,7 @@ html, body {
 @media (max-width: 768px) {
   .panel { width: 100%; top: auto; bottom: 0; height: 55vh; border-left: none; border-top: 1px solid var(--border); }
   #floor-nav { left: 8px; }
+  .floor-dots { max-height: 32vh; }
   .nav-btn { width: 28px; height: 28px; font-size: 12px; }
   .instructions { display: none; }
 }

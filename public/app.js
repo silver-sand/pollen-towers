@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { clearSession, completeSignIn, generateCompanyPlan, getSession, runCompany, startSignIn } from './pollen.js';
+import { floorY, roofY as calculateRoofY, stepFloor } from './tower-layout.js';
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 const FLOOR_HEIGHT = 2.5;
@@ -20,8 +21,7 @@ let selectedCompany  = null;
 let raycaster, mouse;
 let hoveredFloor     = null;
 let floorMeshes      = [];
-let animating        = false;
-let animEnd          = 0; // timestamp (performance.now) when current animation finishes
+let navigationAnimation = 0;
 let cameraPosStart, cameraTargetStart;
 
 // ─── DOM refs ─────────────────────────────────────────────────────────────────
@@ -161,7 +161,7 @@ function createTower() {
     for (const fi of tier.floors) {
       const isOcc = fi < companies.length;
       const c     = companies[fi];
-      const baseY = tier.yBase + fi * FLOOR_HEIGHT;
+      const baseY = floorY(fi, FLOOR_HEIGHT);
       const col   = isOcc ? (c?.color ?? 0x34d399) : 0x252a40;
 
       // Floor slab — OWN material
@@ -255,11 +255,11 @@ function createTower() {
   });
 
   // ── Rooftop ─────────────────────────────────────────────────────────────
-  const roofY = 1.0 + 11 * FLOOR_HEIGHT + 0.2;
+  const towerRoofY = calculateRoofY(TOTAL_FLOORS, FLOOR_HEIGHT);
   const roofGeo = new THREE.BoxGeometry(5.6, 0.4, 5.6);
   const roofMat = makeMat({ color: 0x2a2f45, roughness: 0.8 });
   const roof = new THREE.Mesh(roofGeo, roofMat);
-  roof.position.set(0, roofY, 0);
+  roof.position.set(0, towerRoofY, 0);
   roof.castShadow = true;
   addTowerObj(roof);
 
@@ -267,7 +267,7 @@ function createTower() {
   const mechGeo = new THREE.BoxGeometry(1.5, 1.0, 1.5);
   const mechMat = makeMat({ color: 0x3a3f55, roughness: 0.7 });
   const mech = new THREE.Mesh(mechGeo, mechMat);
-  mech.position.set(0, roofY + 0.7, 0);
+  mech.position.set(0, towerRoofY + 0.7, 0);
   mech.castShadow = true;
   addTowerObj(mech);
 
@@ -276,13 +276,13 @@ function createTower() {
   const spireGeo = new THREE.ConeGeometry(0.25, spireH, 6);
   const spireMat = makeMat({ color: 0xfbbf24, metalness: 0.9, roughness: 0.15 });
   const spire    = new THREE.Mesh(spireGeo, spireMat);
-  spire.position.set(0, roofY + 1.0 + spireH / 2, 0);
+  spire.position.set(0, towerRoofY + 1.0 + spireH / 2, 0);
   spire.castShadow = true;
   addTowerObj(spire);
 
   // Beacon
   const beacon = new THREE.PointLight(0xfbbf24, 2, 25);
-  beacon.position.set(0, roofY + 1.0 + spireH, 0);
+  beacon.position.set(0, towerRoofY + 1.0 + spireH, 0);
   addTowerObj(beacon);
 
   // ── Entrance pillars ─────────────────────────────────────────────────────
@@ -415,39 +415,36 @@ function buildFloorDots() {
 
 function updateNav() {
   floorLabel.textContent = `Floor ${currentFloor + 1}`;
-  prevBtn.disabled       = currentFloor === 0;
-  nextBtn.disabled       = currentFloor >= TOTAL_FLOORS - 1;
+  prevBtn.disabled       = currentFloor >= TOTAL_FLOORS - 1;
+  nextBtn.disabled       = currentFloor === 0;
   document.querySelectorAll('.dot').forEach((d, i) => {
     d.classList.toggle('active', TOTAL_FLOORS - 1 - i === currentFloor);
   });
+  floorDots.querySelector('.dot.active')?.scrollIntoView({ block: 'nearest' });
 }
 
 // ─── Navigation ───────────────────────────────────────────────────────────────
 function goToFloor(index) {
-  // If the previous animation's end time has passed but the flag is still set
-  // (rAF was throttled / tab was backgrounded), force-reset so we never get stuck
-  if (animating && performance.now() >= animEnd) animating = false;
-  if (animating) return;
   index = Math.max(0, Math.min(TOTAL_FLOORS - 1, index));
+  const animationId = ++navigationAnimation;
   currentFloor = index;
 
-  const targetY = 1.0 + index * FLOOR_HEIGHT + 3;
+  const targetY = floorY(index, FLOOR_HEIGHT) + FLOOR_HEIGHT / 2 + 3;
   cameraPosStart  = camera.position.clone();
   cameraTargetStart = controls.target.clone();
   const endTarget = new THREE.Vector3(0, targetY, 0);
   const endPos    = new THREE.Vector3(22, targetY + 6, 22);
   const duration  = 500;
   const start     = performance.now();
-  animating = true;
-  animEnd   = start + duration;
 
   function animate(now) {
+    if (animationId !== navigationAnimation) return;
     const t  = Math.min((now - start) / duration, 1);
     const ease = t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t+2, 3) / 2;
     camera.position.lerpVectors(cameraPosStart, endPos, ease);
     controls.target.lerpVectors(cameraTargetStart, endTarget, ease);
     controls.update();
-    if (t < 1) requestAnimationFrame(animate); else animating = false;
+    if (t < 1) requestAnimationFrame(animate);
   }
   requestAnimationFrame(animate);
   updateNav();
@@ -497,8 +494,14 @@ function declineJob(companyId, jobId) {
 function setupEvents() {
   // Remove the legacy manually pasted key; OAuth credentials are tab-scoped only.
   try { localStorage.removeItem('pollen-towers-pollen-key'); } catch {}
-  prevBtn.addEventListener('click', () => goToFloor(currentFloor - 1));
-  nextBtn.addEventListener('click', () => goToFloor(currentFloor + 1));
+  // Floor 1 is the base; moving up increases the floor index.
+  prevBtn.addEventListener('click', () => goToFloor(stepFloor(currentFloor, 1, TOTAL_FLOORS)));
+  nextBtn.addEventListener('click', () => goToFloor(stepFloor(currentFloor, -1, TOTAL_FLOORS)));
+  document.getElementById('floor-nav').addEventListener('wheel', e => {
+    e.preventDefault();
+    const direction = Math.sign(e.deltaY);
+    if (direction) goToFloor(stepFloor(currentFloor, direction, TOTAL_FLOORS));
+  }, { passive: false });
   rotateBtn.addEventListener('click', toggleAutoRotate);
 
   // Pollinations OAuth returns the short-lived user key in the fragment.
@@ -600,8 +603,8 @@ function setupEvents() {
       if (e.key === 'Escape') closeModal();
       return;
     }
-    if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') { e.preventDefault(); goToFloor(currentFloor + 1); }
-    if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') { e.preventDefault(); goToFloor(currentFloor - 1); }
+    if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') { e.preventDefault(); goToFloor(stepFloor(currentFloor, 1, TOTAL_FLOORS)); }
+    if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') { e.preventDefault(); goToFloor(stepFloor(currentFloor, -1, TOTAL_FLOORS)); }
     if (e.key === 'r' || e.key === 'R') toggleAutoRotate();
   });
 
