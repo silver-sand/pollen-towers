@@ -145,7 +145,6 @@ html, body {
   scrollbar-color: var(--accent) transparent;
   flex: 0 1 auto;
   min-height: 0;
-  max-height: 60vh;
 }
 .floor-dots::-webkit-scrollbar { width: 4px; }
 .floor-dots::-webkit-scrollbar-thumb { background: var(--accent); border-radius: 4px; }

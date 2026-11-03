@@ -152,9 +152,9 @@ function createTower() {
 
   // ── Setback tiers ────────────────────────────────────────────────────────
   const tiers = [
-    { floors: [0,1,2,3],  halfW: 3.8, halfD: 3.8, yBase: 1.0 },
-    { floors: [4,5,6,7],  halfW: 3.2, halfD: 3.2, yBase: 11.0 },
-    { floors: [8,9,10,11],halfW: 2.6, halfD: 2.6, yBase: 21.0 },
+    { floors: [0,1,2,3],  halfW: 3.8, halfD: 3.8 },
+    { floors: [4,5,6,7],  halfW: 3.2, halfD: 3.2 },
+    { floors: [8,9,10,11],halfW: 2.6, halfD: 2.6 },
   ];
 
   tiers.forEach(tier => {
@@ -267,7 +267,7 @@ function createTower() {
   const mechGeo = new THREE.BoxGeometry(1.5, 1.0, 1.5);
   const mechMat = makeMat({ color: 0x3a3f55, roughness: 0.7 });
   const mech = new THREE.Mesh(mechGeo, mechMat);
-  mech.position.set(0, towerRoofY + 0.7, 0);
+  mech.position.set(0, towerRoofY + 0.8, 0);
   mech.castShadow = true;
   addTowerObj(mech);
 
@@ -420,7 +420,11 @@ function updateNav() {
   document.querySelectorAll('.dot').forEach((d, i) => {
     d.classList.toggle('active', TOTAL_FLOORS - 1 - i === currentFloor);
   });
-  floorDots.querySelector('.dot.active')?.scrollIntoView({ block: 'nearest' });
+}
+
+function scrollRailToFloor() {
+  const active = floorDots.querySelector('.dot.active');
+  if (active) active.scrollIntoView({ block: 'nearest' });
 }
 
 // ─── Navigation ───────────────────────────────────────────────────────────────
@@ -448,6 +452,7 @@ function goToFloor(index) {
   }
   requestAnimationFrame(animate);
   updateNav();
+  scrollRailToFloor();
 }
 
 // ─── Modal ────────────────────────────────────────────────────────────────────
@@ -497,10 +502,15 @@ function setupEvents() {
   // Floor 1 is the base; moving up increases the floor index.
   prevBtn.addEventListener('click', () => goToFloor(stepFloor(currentFloor, 1, TOTAL_FLOORS)));
   nextBtn.addEventListener('click', () => goToFloor(stepFloor(currentFloor, -1, TOTAL_FLOORS)));
+  let wheelTimer = 0;
   document.getElementById('floor-nav').addEventListener('wheel', e => {
     e.preventDefault();
-    const direction = Math.sign(e.deltaY);
-    if (direction) goToFloor(stepFloor(currentFloor, direction, TOTAL_FLOORS));
+    // Scroll down = go down a floor, matching the ▼ button. Coalesce a
+    // trackpad flick (many wheel events in one gesture) into one move.
+    const direction = -Math.sign(e.deltaY);
+    if (!direction || wheelTimer) return;
+    wheelTimer = setTimeout(() => { wheelTimer = 0; }, 250);
+    goToFloor(stepFloor(currentFloor, direction, TOTAL_FLOORS));
   }, { passive: false });
   rotateBtn.addEventListener('click', toggleAutoRotate);
 

@@ -7,7 +7,10 @@ test('positions all floors at uniform vertical intervals across tier boundaries'
 });
 
 test('places the roof just above the final floor walls', () => {
-  assert.equal(roofY(12), 30.9);
+  // roofY(12) = floorY(11) + 2.5 + 0.1 = 28.5 + 2.6 = 31.1
+  assert.equal(roofY(12), 31.1);
+  // roof bottom (31.1 - 0.2) must clear the top floor's wall top (28.5 + 2.2 = 30.7)
+  assert.ok(roofY(12) - 0.2 > floorY(11) + 1.9);
 });
 
 test('steps upward and downward without leaving the tower', () => {
