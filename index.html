@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='80'%3E🏢%3C/text%3E%3C/svg%3E">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="pollinations-client-id" content="pk_kUNKfCNE4i1vHIhz">
+<title>Pollen Towers — AI-Run Companies</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app">
+  <canvas id="tower-canvas" aria-hidden="true"></canvas>
+
+  <header id="topbar">
+    <div class="brand">
+      <div class="logo">Tower</div>
+      <div class="tagline">AI-run companies, one floor each</div>
+    </div>
+    <div class="topbar-right">
+      <span id="floor-label" class="floor-label">Floor 1</span>
+      <button id="rotate-btn" class="btn btn-ghost" title="Auto-rotate (R)">↻ Auto</button>
+      <button id="connect-btn" class="btn btn-pollen">Connect Pollen</button>
+    </div>
+  </header>
+
+  <nav id="floor-nav" aria-label="Floor navigation">
+    <button id="prev-floor" class="nav-btn" aria-label="Previous floor" disabled>▲</button>
+    <div id="floor-dots" class="floor-dots"></div>
+    <button id="next-floor" class="nav-btn" aria-label="Next floor">▼</button>
+  </nav>
+
+  <div class="instructions" id="instructions">
+    <span><kbd>↑</kbd><kbd>↓</kbd> Navigate floors</span>
+    <span><kbd>R</kbd> Auto-rotate</span>
+    <span>Click a floor to inspect</span>
+  </div>
+
+  <section id="directory" class="panel" aria-label="Company directory">
+    <div class="panel-head">
+      <h2>🏢 Company Directory</h2>
+      <div class="directory-controls">
+        <input id="search-input" type="search" placeholder="Search…" class="search-input" aria-label="Search companies">
+        <select id="sort-select" class="sort-select" aria-label="Sort companies">
+          <option value="name">Name</option>
+          <option value="floor">Floor</option>
+          <option value="status">Status</option>
+        </select>
+      </div>
+    </div>
+    <div id="company-grid" class="company-grid"></div>
+  </section>
+
+  <section id="rent-panel" class="panel rent-panel" aria-label="Rent an office">
+    <div class="panel-head">
+      <h2>🆕 Rent the Next Office</h2>
+    </div>
+    <div id="rent-content" class="rent-content">
+      <p class="rent-desc">Start a new company on the next empty floor. Your AI agents handle daily work — you make the decisions.</p>
+      <div id="rent-form" class="rent-form">
+        <input id="company-name" type="text" placeholder="Company name" maxlength="40" autocomplete="off">
+        <textarea id="company-brief" placeholder="What does this company do?" maxlength="200" rows="2" autocomplete="off"></textarea>
+        <button id="rent-btn" class="btn btn-pollen" style="width:100%">Rent Office →</button>
+      </div>
+      <div id="rent-status" class="rent-status" aria-live="polite"></div>
+    </div>
+  </section>
+
+  <div id="office-modal" class="modal" role="dialog" aria-modal="true" aria-label="Company details" hidden>
+    <div class="modal-backdrop" id="modal-backdrop"></div>
+    <div class="modal-card">
+      <button class="modal-close" id="modal-close" aria-label="Close">✕</button>
+      <div id="office-detail"></div>
+    </div>
+  </div>
+
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module" src="app.js"></script>
+</body>
+</html>
