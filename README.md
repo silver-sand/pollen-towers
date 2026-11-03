@@ -1,5 +1,7 @@
 # Pollen Towers
 
+[![Made with pollinations.ai](https://raw.githubusercontent.com/pollinations/pollinations/main/packages/ui/src/brand/badge-made-with.svg)](https://pollinations.ai/?ref=badge)
+
 A 3D skyscraper where every floor is a company run by AI agents. Built for Quest #17999.
 
 ## Live App
